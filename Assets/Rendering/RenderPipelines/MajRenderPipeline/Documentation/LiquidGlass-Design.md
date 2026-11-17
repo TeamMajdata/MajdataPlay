@@ -57,6 +57,12 @@ a cover. RT3 follows categories and ordinary foreground UI, before peripheral
 button bodies and the Liquid List cover overlays. No later cut overwrites an
 earlier result.
 
+The camera clears capture readiness at the start of its capture sequence.
+If no visible surface reads RT1, MRP keeps drawing past the first cut without
+storing and reopening the scene attachments there. The RT2 and RT3 cuts still
+occur at their original draw boundaries when requested. The six work textures
+remain pooled and the rendering of any stage that runs is unchanged.
+
 Beautiful and Refined now default to MSAA off (one scene sample). Custom
 2x/4x/8x requests remain independent and apply to backdrop-capture cameras too;
 there is no hidden single-sample menu override. Filter and raw snapshot targets
@@ -231,9 +237,11 @@ consumer mapping.
 
 Each first copy/downsample selects `_MajUiCaptureClipUvX/Y` for its current
 source, writes coverage to Alpha and multiplies RGB by it. Gaussian H/V filter
-the premultiplied RGBA together to exclude invalid exterior data. Board/RT1
-disables this encoding and keeps its original sampling. The actual camera output
-and masks are unchanged; no whole-capture color padding or mask reordering is used.
+the premultiplied RGBA together to exclude invalid exterior data. The Login
+window opts into this encoding for liquid RT1 so the circular black mask is not
+blurred into the board; it normalizes RGB by filtered coverage without clamping
+the lookup position. Other boards retain their original sampling. The actual
+camera output and masks are unchanged.
 
 Every RT2 consumer uses its own Category slot, including native controls such as
 Setting's dark value plate; selecting the slot follows the sampled source, not
@@ -241,7 +249,7 @@ just the `IsCategory` visual-role flag. RT3 applies its slot to real peripheral
 keys and the explicitly registered Liquid List cover overlays. A visible frame
 can request RT3 and provide the main-display mapping without a peripheral key.
 These consumers radially limit refracted lookup positions to
-their source's usable circle before the existing single RGBA read. The CPU
+their source's usable circle before sampling. The CPU
 precomputes the projected center and a conservative two-texel inset using that
 result's dimensions; points already inside the safe range are unchanged.
 Filtered Alpha normalizes sampled RGB and represents valid filtering data, not
@@ -308,25 +316,17 @@ VRAM or bandwidth is not asserted to halve.
 `s_sourceSize`, `s_halfResolutionSize` and `s_gaussianResolutionSize` retain
 independent source, raw and Gaussian sizes. `GetSourceSize`,
 `GetHalfResolutionSize` and `GetGaussianResolutionSize` compute these extents;
-there is no long-edge cap. Actual result texel sizes are published. With all
+there is no long-edge cap. Circle sampling bounds use the actual result size. With all
 roles visible, Gaussian still has nine filter draws and Liquid five processing
 draws: three quarter-size RT1 filters plus two half-size raw copies.
 
-The Gaussian is fixed sigma 4 / radius 8 on the quarter grid: 17 logical taps,
-four paired offsets each sampled on both sides plus center, nine bilinear reads
-per axis. With four downsample calls the stage sums 4+9+9=22 over equal quarter
-output areas across three passes, not in one pixel invocation or as a physical
-bandwidth count. GL Point-source reconstruction can expand only the downsample
-calls here; owned H/V inputs use Bilinear. Pure-math `BuildPanelBlurKernel()`
-builds the shared pairs and center once at type initialization. Resize/reset
-never rebuilds or clears the CPU kernel; release clears GPU bindings.
-`_MajUiGaussianCenterWeight` and `_MajUiGaussianPairs[4]` drive a fixed unrolled
-loop. The previous half-grid sigma 8 / radius 16, 17 reads/axis and size-scaled
-kernel/1024 reference cap are historical. Both grid/kernel choices suggest
-approximately 16 source-pixel continuous sigma, but downsample/reconstruction
-can alter fine detail and PSF. No tests, compilation or device runs cover this
-requested revision; the user will assess it. Visual equality and FPS gain are
-not claimed.
+The current Gaussian is fixed sigma 3 / radius 6 on the quarter grid. Three
+symmetric bilinear pairs plus the center represent 13 logical taps in seven
+reads per axis. The CPU builds the kernel once and the capture material binds
+it at creation. Resize only updates the sampling step. The four downsample
+reads plus two seven-read passes sum to 18 calls over equal output areas.
+Previously sigma 4 / radius 8 used nine reads per axis on the same grid.
+These counts do not predict physical bandwidth or device frame time.
 No mipmap blur is enabled in production. Isolated A/B tests compared explicit
 LOD, mip-prefiltered Gaussian and a nine-tap reconstruction against the half-size
 reference. Cheap candidates changed thin rings, edge widths or PSFs. The close
@@ -675,6 +675,14 @@ contours, body insets and nine-slice mapping remain unchanged. The scale from
 design units to root-Canvas units is 1.6, adjusted for nested control transforms
 and small controls.
 The fine reflection width and softness are independent of this wider lens band.
+The Login account and password backgrounds opt out of the synthetic fine glint
+with `_liquidSuppressContourGlint`. This preserves their original Sprite edge
+and focus artwork, with the broad glass lighting and refraction still enabled.
+The Login window and its two outer buttons also opt out of the fine glint so it
+does not trace a hard white line along the drop shadow.
+On the eight peripheral keys, only the radial color transition uses twice the
+normalized edge depth, halving its width without changing the fine rim or the
+refraction range.
 
 An explicit per-surface `_liquidRefractionWidthScale` multiplies the selected
 base width afterwards; its default is one. The List, Setting and SortFind
@@ -803,57 +811,38 @@ they do not have menu-specific light parameters.
 
 ## Reflection and color
 
-The fine neutral reflection is centered on signed distance zero, rather than an
-inset peak or a clamped exterior plateau. Its stored width/softness remain 1.5 /
-0.875 design units, transformed with the control's layout, but the fine profile
-uses half the earlier sigma. Four analytic points integrate the pixel footprint
-without texture reads:
+Liquid glass mixes transmitted scene color with authored fill before lighting
+and before reconstruction of the original ink. Only the authored fill sets
+material depth. The background never switches the rim color.
 
-```text
-sigma = 0.5 * max(softness, 0.35 * width)
-profile_i = exp(-0.5 * (signedDepth + footprint_i)^2 / sigma^2)
-headroom = saturate(1 - max(finishedBody.rgb))
-gain = 1.6 * max(materialHighlight / 0.045, 0)
-fineDirection = min(1, 1.2 * (0.3 + 0.7 * light^2))
-reflection = mean(min(headroom, headroom * profile_i * gain)) * fineDirection
-edgeTarget = finishedBody + reflection
-surface = saturate(max(finishedBody, edgeTarget))
-```
+| Surface | Authored fill share | Transmission tint filter |
+| --- | --- | --- |
+| Large liquid panels | 0.15 | `lerp(white, authoredFill, 0.65)` |
+| Physical outer keys | At most 0.18 | Authored tint strength capped at 0.72 |
+| Other controls | Authored value | Authored value |
 
-Body masking is completed before this fine light. The original PNG coverage then
-clips it once at final output, instead of attenuating it again with body coverage.
-Brightness supplies only the available neutral-light budget; it no longer
-creates a threshold that can erase a light button's narrow profile. Increasing
-gain affects the profile while its peak remains bounded by headroom. The separate
-inner lip uses a pixel-variance Gaussian approximation. Widths remain continuous,
-with no integer-width rounding or minimum-one-pixel stroke.
-A weak, soft inner lip makes a white card's edge readable against a white scene.
-This lip is independent of the reflection gain.
+The outer key body gets darker inward from its own baked circle. A soft white
+shoulder follows the circle, including when the screen mask clips most of the
+button. The fine glint integrates four cubic evaluations across the pixel
+footprint. Neither the shoulder nor the glint changes alpha or needs an
+additional texture read. Large panels keep their broad center flat, with
+light gradients limited to the contour and the top and bottom ten percent.
 
-Liquid glass separates the original artwork fill from the processed transmitted
-background. Their current mix and self-tint strengths are:
+The List cover frame keeps only the soft reflection across the annulus. The
+drop shadow rises gradually outside the frame, so it does not form a hard
+outline against the white edge. The difficulty color and cover draw order are
+unchanged.
+The outer antialiased pixels read RT3 at the unshifted UV. Fully covered pixels
+keep the lens displacement. Both use an explicit level-zero sample, so sampling
+does not depend on implicit derivatives at a partially covered edge.
 
-| Surface | Raw authored fill share | Transmission share | Transmission self-tint strength |
-| --- | --- | --- | --- |
-| List, Setting, Search and Calibrator main background boards | 0.4233333 | 0.5766667 | 0 |
-| Practice background board | 0.25 | 0.75 | 0.23 |
-| Two submonitor cards | 0.25 | 0.75 | 0.42 |
-| Title loading plate | 0.4233333 | 0.5766667 | 0 |
-| Other glass controls | 0.25 | 0.75 | 0.90 |
+Only physical peripheral keys soften transmission from RT3 around the existing
+refracted coordinate. A weighted center tap and four bilinear neighbors filter RGBA together
+before coverage normalization, softening narrow shadows already drawn into the
+prefix. Categories, cover frames, Gaussian and shared captures are unaffected.
 
-The transmission includes the selected texture-derived filter and existing
-angular sheen. Mixing occurs before reconstruction of the original symbols,
-blue frames and other decoration, and before the separate fine neutral rim.
-The calibrated main-background overrides do not change the top cards, peripheral
-buttons, other small controls or Practice.
-
-The previous liquid-only white-frost parameter has been removed. The submonitor
-cards use 25-percent original artwork and 75-percent processed transmission,
-without a second white veil. Title follows the main-board color mixture while
-retaining its calibrated sliced geometry and refraction width. Large-panel Gaussian tint and
-frost settings remain separate and unchanged. Body coverage remains normalized;
-the mixture does not blend the sharp, unfiltered scene back through alpha and
-requires no additional capture, RT or texture read.
+Gaussian shading, original ink, native mask coverage and the three capture
+cuts keep their own existing behavior.
 
 ### Targeted decoration and Gaussian peripheral policies
 

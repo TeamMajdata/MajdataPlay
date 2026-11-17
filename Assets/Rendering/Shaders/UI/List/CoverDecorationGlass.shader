@@ -33,12 +33,9 @@ Shader "Maj/UI/List/Cover Decoration Glass"
         _ShapeUvTransform ("Sprite UV To Circle", Vector) = (1,1,0,0)
         _Radius ("Circle Radius", Float) = 0.5
         _BevelWidth ("Soft Reflection Width", Float) = 0.045
-        _HighlightWidth ("Fine Reflection Width", Float) = 0.006
         _HighlightStrength ("Reflection Strength", Range(0,1)) = 0.95
         _Refraction ("Frame Refraction", Float) = 0.022
         _Transmission ("Frame Background Share", Range(0,1)) = 0.72
-        _OutlineColor ("Outline Color", Color) = (1,1,1,1)
-        _OutlineWidth ("Outline Width", Float) = 0
         _ShadowColor ("Shadow Color", Color) = (0,0,0,0.5)
         _ShadowOffset ("Shadow Offset", Vector) = (0.02,-0.02,0,0)
         _ShadowSoftness ("Shadow Softness", Float) = 0.02
@@ -82,6 +79,7 @@ Shader "Maj/UI/List/Cover Decoration Glass"
             #include "UnityCG.cginc"
             #include "UnityUI.cginc"
             #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajMipSampling.hlsl"
+            #include "Assets/Rendering/Shaders/UI/GlassSurfaceLighting.hlsl"
 
             sampler2D _MainTex;
             sampler2D _MajUiButtonBlurTexture;
@@ -102,12 +100,9 @@ Shader "Maj/UI/List/Cover Decoration Glass"
                 float4 _ShapeUvTransform;
                 float _Radius;
                 float _BevelWidth;
-                float _HighlightWidth;
                 half _HighlightStrength;
                 float _Refraction;
                 half _Transmission;
-                half4 _OutlineColor;
-                float _OutlineWidth;
                 half4 _ShadowColor;
                 float4 _ShadowOffset;
                 float _ShadowSoftness;
@@ -169,7 +164,6 @@ Shader "Maj/UI/List/Cover Decoration Glass"
                 float2 radialGradient = float2(ddx(distanceToCenter), ddy(distanceToCenter));
                 float aa = max(abs(radialGradient.x) + abs(radialGradient.y), 0.00001) * 0.5;
                 float2 normal = circlePosition / max(distanceToCenter, 0.00001);
-                float edgeDistance = abs(distanceToCenter - _Radius);
                 float2 screenUV = input.screenPosition.xy / input.screenPosition.w;
                 // Derivatives precede the narrow-band branch, including during animated scaling.
                 float2 shapeDx = ddx(circlePosition);
@@ -184,10 +178,8 @@ Shader "Maj/UI/List/Cover Decoration Glass"
                 {
                     inlayCoverage = (1 - smoothstep(input.uv.z - aa, input.uv.z + aa, distanceToCenter)) * saturate(input.uv.w);
                 }
-                float edgeInner = _Radius - max(_OutlineWidth, 0) * 0.5;
-                float edgeOuter = _Radius + max(_OutlineWidth, 0) * 0.5;
-                float bodyCoverage = 1 - smoothstep(edgeInner - aa, edgeInner + aa, distanceToCenter);
-                float outerCoverage = 1 - smoothstep(edgeOuter - aa, edgeOuter + aa, distanceToCenter);
+                // The clearcoat has one silhouette and no separate outline layer.
+                float bodyCoverage = 1 - smoothstep(_Radius - aa, _Radius + aa, distanceToCenter);
                 // The same annulus covers the captured ring and the outer white
                 // frame. The later cover retains its original clear center.
                 float innerRadius = max(_Radius - _BevelWidth, 0);
@@ -199,13 +191,15 @@ Shader "Maj/UI/List/Cover Decoration Glass"
                 {
                     bodyAlpha *= 1 - inlayCoverage;
                 }
-                half outlineAlpha = _OutlineColor.a * max(outerCoverage - bodyCoverage, 0);
                 float shadowDistance = length(circlePosition + _ShadowOffset.xy);
                 float shadowWidth = max(_ShadowSoftness, max(fwidth(shadowDistance), 0.00001));
-                // The clear center must not expose the interior of the shadow disc.
-                half shadowAlpha = _ShadowColor.a * (1 - smoothstep(_Radius, _Radius + shadowWidth, shadowDistance)) * (1 - outerCoverage);
+                // Rise softly outside the actual body instead of exposing a dark disc at its AA edge.
+                // Keep the offset falloff and clear center while separating the shadow from the white shoulder.
+                half shadowOnset = smoothstep(0, shadowWidth * 0.5, distanceToCenter - _Radius);
+                half shadowAlpha = _ShadowColor.a * shadowOnset
+                    * (1 - smoothstep(_Radius, _Radius + shadowWidth, shadowDistance)) * (1 - bodyCoverage);
                 UNITY_BRANCH
-                if (bodyAlpha + outlineAlpha + shadowAlpha <= 0)
+                if (bodyAlpha + shadowAlpha <= 0)
                 {
                     #ifdef UNITY_UI_ALPHACLIP
                     clip(-1);
@@ -215,14 +209,21 @@ Shader "Maj/UI/List/Cover Decoration Glass"
                 UNITY_BRANCH
                 if (_MajUiButtonBlurReady > 0.5 && bodyAlpha > 0)
                 {
-                    float t = saturate((_Radius - distanceToCenter) / _BevelWidth);
-                    float lens = 4 * t * (1 - t);
-                    // Both displacement and slope vanish at the bevel's ends.
-                    float2 offset = -normal * (_Refraction * lens * lens);
-                    float inverseDeterminant = rcp(shapeDx.x * shapeDy.y - shapeDx.y * shapeDy.x);
-                    float2 pixelOffset = float2(shapeDy.y * offset.x - shapeDy.x * offset.y,
-                        shapeDx.x * offset.y - shapeDx.y * offset.x) * inverseDeterminant;
-                    float2 sampleUV = screenUV + screenDx * pixelOffset.x + screenDy * pixelOffset.y;
+                    float2 sampleUV = screenUV;
+                    float determinant = shapeDx.x * shapeDy.y - shapeDx.y * shapeDy.x;
+                    UNITY_BRANCH
+                    if (bodyCoverage >= 1 && abs(determinant) > 1e-12)
+                    {
+                        // The subpixel silhouette has negligible displacement. Keep its sample exact
+                        // and invert the affine mapping only for the fully covered lens interior.
+                        float t = saturate((_Radius - distanceToCenter) / _BevelWidth);
+                        float lens = 4 * t * (1 - t);
+                        float2 offset = -normal * (_Refraction * lens * lens);
+                        float inverseDeterminant = rcp(determinant);
+                        float2 pixelOffset = float2(shapeDy.y * offset.x - shapeDy.x * offset.y,
+                            shapeDx.x * offset.y - shapeDx.y * offset.x) * inverseDeterminant;
+                        sampleUV += screenDx * pixelOffset.x + screenDy * pixelOffset.y;
+                    }
                     UNITY_BRANCH
                     if (_MajUiButtonClipUvX.w > 0.5)
                     {
@@ -236,7 +237,8 @@ Shader "Maj/UI/List/Cover Decoration Glass"
                                 * (safeRadius * rsqrt(squaredRadius));
                         }
                     }
-                    half4 captured = tex2D(_MajUiButtonBlurTexture, sampleUV);
+                    // RT3 has no mip chain. Explicit LOD keeps this nonuniform body branch derivative-independent.
+                    half4 captured = tex2Dlod(_MajUiButtonBlurTexture, float4(sampleUV, 0, 0));
                     half3 backdrop = captured.rgb;
                     if (_MajUiButtonClipUvX.w > 0.5)
                     {
@@ -248,55 +250,17 @@ Shader "Maj/UI/List/Cover Decoration Glass"
                     fill = lerp(fill, backdrop * fill, transmission);
                 }
                 // Reflection is applied after transmission, independently of ring color.
-                float2 reflectionNormal = (screenDx * dot(normal, shapeDx) + screenDy * dot(normal, shapeDy)) * _ScreenParams.xy;
-                reflectionNormal *= rsqrt(max(dot(reflectionNormal, reflectionNormal), 1e-12));
-                half softReflection = 1 - smoothstep(0, _BevelWidth, edgeDistance);
-                half light = saturate(dot(reflectionNormal, float2(-0.6, 0.8)) * 0.5h + 0.5h);
-                half direction = 0.3h + 0.7h * light * light;
-                float pixelWidth = max(length(radialGradient), 0.00001);
-                // Match the category's width/softness ratio without imposing a
-                // one-pixel minimum on the optical profile.
-                float width = max(_HighlightWidth, 0.00001);
-                float sigma = width * (7.0 / 12.0);
-                float variance = sigma * sigma + pixelWidth * pixelWidth / 12;
-                float inside = max(_Radius - distanceToCenter, 0);
-                float innerDelta = inside - (width + 2 * sqrt(variance));
-                half innerShade = 0;
-                UNITY_BRANCH
-                if (_HighlightWidth > 0 && innerDelta * innerDelta <= 36 * variance)
-                {
-                    half opposite = 1 - light;
-                    innerShade = exp2(-0.72134752 * innerDelta * innerDelta / variance)
-                        * sigma * rsqrt(variance) * (0.04h + 0.10h * opposite * opposite) * _HighlightStrength;
-                }
-                fill += (1 - fill) * (softReflection * softReflection * direction
-                    * _HighlightStrength * (0.12h + 0.10h * inlayCoverage));
-                // Shade the finished transmitted/reflected surface, as the category
-                // capsules do. Otherwise the broad reflection fills the dark lip back in.
-                fill *= 1 - innerShade;
-                float fineSigma = sigma * 0.5;
-                float delta = _Radius - distanceToCenter;
-                UNITY_BRANCH
-                if (_HighlightWidth > 0 && abs(delta) <= 6 * fineSigma + 0.36 * pixelWidth)
-                {
-                    // Integrate the nonlinear light gain over four subpixel
-                    // footprints, then Max the target over the finished surface.
-                    float2 footprint = 0.25 * float2(radialGradient.x + radialGradient.y,
-                        radialGradient.x - radialGradient.y);
-                    float4 sampleDelta = delta + float4(footprint.x, -footprint.x, footprint.y, -footprint.y);
-                    float4 profile = exp2(-0.72134752 * sampleDelta * sampleDelta / (fineSigma * fineSigma));
-                    half fineDirection = min(1.0h, direction * 1.2h);
-                    half reflection = dot(saturate(profile * (1.6 * _HighlightStrength)),
-                        float4(0.25, 0.25, 0.25, 0.25)) * fineDirection;
-                    // Per-channel headroom keeps neutral glints visible even
-                    // when a difficulty color already saturates one channel.
-                    half3 edgeTarget = fill + saturate(1 - fill) * reflection;
-                    fill = max(fill, edgeTarget);
-                }
-                half foregroundAlpha = saturate(bodyAlpha + outlineAlpha);
+                // Use only the soft reflection across the visible annulus. The white frame
+                // already defines the silhouette and needs no second contour glint.
+                half materialDepth = MajGlassMaterialDepth(artwork.rgb * input.color.rgb);
+                fill = MajApplyGlassSurfaceLighting(fill, _Radius - distanceToCenter, radialGradient,
+                    max(_Radius - distanceToCenter, 0) / max(_BevelWidth, 0.00001),
+                    circlePosition.y / max(_Radius, 0.00001),
+                    0, materialDepth, max(_HighlightStrength, 0), false, false);
+                half foregroundAlpha = saturate(bodyAlpha);
                 // Frame shadowAlpha already includes the exterior contour's coverage.
                 // Multiplying that coverage again would attenuate the shadow twice.
-                half4 color = half4(fill * bodyAlpha + _OutlineColor.rgb * outlineAlpha + _ShadowColor.rgb * shadowAlpha,
+                half4 color = half4(fill * bodyAlpha + _ShadowColor.rgb * shadowAlpha,
                     foregroundAlpha + shadowAlpha);
                 color *= saturate(input.color.a);
                 #ifdef UNITY_UI_CLIP_RECT

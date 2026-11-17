@@ -87,9 +87,9 @@ namespace MajdataPlay.Tests.Game.Rendering
                 "Gaussian captures must derive their quarter-size grid from the actual scene attachment.");
         }
 
-        /// <summary>Checks both Gaussian axes share the fixed sigma-four, radius-eight kernel with normalized energy.</summary>
+        /// <summary>Checks both Gaussian axes share a normalized sigma-three, radius-six response using seven bilinear reads.</summary>
         [Test]
-        public void GaussianKernel_UsesFourNormalizedBilinearPairs()
+        public void GaussianKernel_UsesThreeNormalizedBilinearPairsAndSevenReads()
         {
             typeof(UiPvBackdropBlur).GetMethod("BuildPanelBlurKernel", BindingFlags.NonPublic | BindingFlags.Static)!
                 .Invoke(null, null);
@@ -97,13 +97,18 @@ namespace MajdataPlay.Tests.Game.Rendering
                 .GetField("s_gaussianCenterWeight", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
             var pairs = (Vector4[])typeof(UiPvBackdropBlur)
                 .GetField("s_gaussianKernelPairs", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
-            Assert.That(pairs.Length, Is.EqualTo(4));
-            var sigma = 4.0;
-            var radius = 8;
+            Assert.That(pairs.Length, Is.EqualTo(3));
+            var reads = 1 + 2 * pairs.Length;
+            Assert.That(reads, Is.EqualTo(7), "Each axis needs one center read and two symmetric reads per packed pair.");
+            var sigma = 3.0;
+            var radius = 6;
             var normalization = 1.0;
+            var expectedMoment = 0.0;
             for (var tap = 1; tap <= radius; tap++)
             {
-                normalization += 2.0 * Math.Exp(-tap * tap / (2.0 * sigma * sigma));
+                var weight = Math.Exp(-tap * tap / (2.0 * sigma * sigma));
+                normalization += 2.0 * weight;
+                expectedMoment += 2.0 * weight * tap * tap;
             }
             Assert.That(centerWeight, Is.EqualTo(1.0 / normalization).Within(0.000001));
             var energy = (double)centerWeight;
@@ -124,7 +129,9 @@ namespace MajdataPlay.Tests.Game.Rendering
                 moment += 2.0 * weight * ((1.0 - fraction) * first * first + fraction * (first + 1.0) * (first + 1.0));
             }
             Assert.That(energy, Is.EqualTo(1.0).Within(0.000001));
-            TestContext.WriteLine($"QUARTER_GAUSSIAN_KERNEL sigma={sigma:F1} radius={radius} pairs={pairs.Length} energy={energy:F8} variance={moment / energy:F6}");
+            Assert.That(moment / energy, Is.EqualTo(expectedMoment / normalization).Within(0.00001),
+                "The packed bilinear offsets must retain the truncated Gaussian impulse response's variance.");
+            TestContext.WriteLine($"QUARTER_GAUSSIAN_KERNEL sigma={sigma:F1} radius={radius} pairs={pairs.Length} reads={reads} energy={energy:F8} variance={moment / energy:F6}");
         }
 
         /// <summary>Checks the circle mapping follows the authored transform without applying the output viewport twice.</summary>

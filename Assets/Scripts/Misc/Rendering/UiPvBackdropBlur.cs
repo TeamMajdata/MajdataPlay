@@ -15,9 +15,9 @@ namespace MajdataPlay.Rendering
         /// <summary>Loads the included filter and panel templates without shader-name lookup.</summary>
         private const string ResourcesPath = "Rendering/UI/OutlineTheme";
         /// <summary>Sets the Gaussian standard deviation in quarter-resolution texels.</summary>
-        private const double GaussianSigma = 4.0;
-        /// <summary>Bounds the Gaussian support to eight quarter-resolution texels on either side.</summary>
-        private const int GaussianRadius = 8;
+        private const double GaussianSigma = 3.0;
+        /// <summary>Bounds the Gaussian support to six quarter-resolution texels on either side.</summary>
+        private const int GaussianRadius = 6;
         /// <summary>Names the scene-prefix board source before any foreground board or song cover.</summary>
         private const string BoardSampleName = "MRP.UI.BoardBackgroundSource";
         /// <summary>Names the source after board and song-cover drawing, before categories.</summary>
@@ -26,22 +26,20 @@ namespace MajdataPlay.Rendering
         private const string ButtonSampleName = "MRP.UI.ButtonBackgroundSource";
         /// <summary>Publishes the independently retained category result.</summary>
         private static readonly int BlurTextureId = Shader.PropertyToID("_MajPvBlurTexture");
-        /// <summary>Publishes the category result's actual texel size.</summary>
-        private static readonly int BlurTexelSizeId = Shader.PropertyToID("_MajPvBlurTexture_TexelSize");
         /// <summary>Publishes category readiness only after its current-frame capture.</summary>
         private static readonly int ReadyId = Shader.PropertyToID("_MajPvBlurReady");
         /// <summary>Publishes the scene-prefix board result.</summary>
         private static readonly int PanelBlurTextureId = Shader.PropertyToID("_MajUiPanelBlurTexture");
-        /// <summary>Publishes the board result's actual texel size.</summary>
-        private static readonly int PanelBlurTexelSizeId = Shader.PropertyToID("_MajUiPanelBlurTexture_TexelSize");
         /// <summary>Publishes board readiness independently of categories and peripheral buttons.</summary>
         private static readonly int PanelReadyId = Shader.PropertyToID("_MajUiPanelBlurReady");
+        /// <summary>Marks RT1 as coverage weighted when a liquid board excludes the circular display mask.</summary>
+        private static readonly int PanelCaptureHasCoverageId = Shader.PropertyToID("_MajUiPanelCaptureHasCoverage");
         /// <summary>Publishes the independently retained peripheral-button result.</summary>
         private static readonly int ButtonBlurTextureId = Shader.PropertyToID("_MajUiButtonBlurTexture");
-        /// <summary>Publishes the peripheral-button result's actual texel size.</summary>
-        private static readonly int ButtonBlurTexelSizeId = Shader.PropertyToID("_MajUiButtonBlurTexture_TexelSize");
         /// <summary>Publishes peripheral readiness only after its current-frame capture.</summary>
         private static readonly int ButtonReadyId = Shader.PropertyToID("_MajUiButtonBlurReady");
+        /// <summary>Offsets the liquid peripheral key filter in actual RT3 texels.</summary>
+        private static readonly int ButtonCaptureInvSizeId = Shader.PropertyToID("_MajUiButtonCaptureInvSize");
         /// <summary>Maps capture UVs to the main circle's normalized horizontal coordinate; W enables the mapping.</summary>
         private static readonly int ButtonClipUvXId = Shader.PropertyToID("_MajUiButtonClipUvX");
         /// <summary>Maps capture UVs to the main circle's normalized vertical coordinate.</summary>
@@ -66,7 +64,7 @@ namespace MajdataPlay.Rendering
         private static readonly int PanelBlurStepId = Shader.PropertyToID("_MajUiPanelBlurStep");
         /// <summary>Supplies the normalized center weight shared by both Gaussian axes.</summary>
         private static readonly int GaussianCenterWeightId = Shader.PropertyToID("_MajUiGaussianCenterWeight");
-        /// <summary>Supplies the four adjacent-texel pairs shared by both Gaussian axes.</summary>
+        /// <summary>Supplies the three adjacent-texel pairs shared by both Gaussian axes.</summary>
         private static readonly int GaussianPairsId = Shader.PropertyToID("_MajUiGaussianPairs");
         /// <summary>Retains registered consumers without per-frame snapshots or scene searches.</summary>
         private static readonly List<UiBackdropPanel> s_panels = new(40);
@@ -297,6 +295,7 @@ namespace MajdataPlay.Rendering
             {
                 MajUiBackdropBridge.Unregister(s_capture);
                 RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
+                s_capture.Invalidate();
                 SetUnavailable();
             }
         }
@@ -309,13 +308,14 @@ namespace MajdataPlay.Rendering
             SetUnavailable();
         }
 
-        /// <summary>Checks visible source consumers without scene searches or temporary collections.</summary>
+        /// <summary>Collects visible stage requirements and capture ownership in one camera-local traversal.</summary>
         /// <param name="camera">The intended menu camera.</param>
-        /// <param name="role">The requested source role, or null for any role.</param>
-        /// <param name="ownersOnly">Whether reuse-only consumers must be excluded from activation.</param>
-        /// <returns>Whether a supported visible consumer matches this camera and role.</returns>
-        private static bool HasVisibleConsumer(Camera camera, UiBackdropSourceRole? role = null, bool ownersOnly = false)
+        /// <param name="hasOwner">Receives whether a visible surface owns capture activation rather than only reusing it.</param>
+        /// <returns>The visible stages, including reuse-only boards when another surface owns capture activation.</returns>
+        private static MajUiBackdropStages GetVisibleStages(Camera camera, out bool hasOwner)
         {
+            var stages = MajUiBackdropStages.None;
+            hasOwner = false;
             for (var index = s_panels.Count - 1; index >= 0; index--)
             {
                 var panel = s_panels[index];
@@ -323,18 +323,15 @@ namespace MajdataPlay.Rendering
                 {
                     s_panels.RemoveAt(index);
                 }
-                else if ((!role.HasValue || panel.SourceRole == role.Value)
-                    && (!ownersOnly || !panel.ReusesPanelCaptureOnly)
-                    && panel.IsVisible && panel.RenderCamera == camera)
+                else if (panel.IsVisible && panel.RenderCamera == camera)
                 {
-                    // This is a boolean query: avoid repeating native Canvas queries after a match.
-                    // OnDisable unregisters live panels; encountered destroyed entries are still pruned.
-                    return true;
+                    stages |= GetCaptureStage(panel.SourceRole);
+                    hasOwner |= !panel.ReusesPanelCaptureOnly;
                 }
             }
-            if (!IsLiquidGlass || (role.HasValue && role.Value != UiBackdropSourceRole.Peripheral))
+            if (!IsLiquidGlass)
             {
-                return false;
+                return stages;
             }
             for (var index = s_liquidFrameConsumers.Count - 1; index >= 0; index--)
             {
@@ -345,10 +342,24 @@ namespace MajdataPlay.Rendering
                 }
                 else if (image.IsLiquidFrameCaptureVisible && image.RenderCamera == camera)
                 {
-                    return true;
+                    stages |= MajUiBackdropStages.Peripheral;
+                    hasOwner = true;
                 }
             }
-            return false;
+            return stages;
+        }
+
+        /// <summary>Maps the integration-owned capture role to the reusable pipeline's stage flags.</summary>
+        /// <param name="role">The ordered scene prefix consumed by a visible panel.</param>
+        /// <returns>The corresponding single capture-stage flag.</returns>
+        private static MajUiBackdropStages GetCaptureStage(UiBackdropSourceRole role)
+        {
+            return role switch
+            {
+                UiBackdropSourceRole.Board => MajUiBackdropStages.Board,
+                UiBackdropSourceRole.Category => MajUiBackdropStages.Category,
+                _ => MajUiBackdropStages.Peripheral
+            };
         }
 
         /// <summary>Loads supported filter templates, retaining original Alpha on failure.</summary>
@@ -431,7 +442,7 @@ namespace MajdataPlay.Rendering
             return true;
         }
 
-        /// <summary>Builds the fixed sigma-four, radius-eight kernel shared by horizontal and vertical filtering.</summary>
+        /// <summary>Builds the fixed sigma-three, radius-six kernel shared by horizontal and vertical filtering.</summary>
         /// <returns>The normalized center weight; each retained XY pair stores its weight and bilinear offset.</returns>
         private static float BuildPanelBlurKernel()
         {
@@ -574,6 +585,7 @@ namespace MajdataPlay.Rendering
         private static void SetUnavailable()
         {
             Shader.SetGlobalFloat(PanelReadyId, 0f);
+            Shader.SetGlobalFloat(PanelCaptureHasCoverageId, 0f);
             Shader.SetGlobalFloat(ReadyId, 0f);
             Shader.SetGlobalFloat(ButtonReadyId, 0f);
             Shader.SetGlobalVector(ButtonClipUvXId, Vector4.zero);
@@ -591,6 +603,7 @@ namespace MajdataPlay.Rendering
         private static void SetUnavailable(CommandBuffer buffer)
         {
             buffer.SetGlobalFloat(PanelReadyId, 0f);
+            buffer.SetGlobalFloat(PanelCaptureHasCoverageId, 0f);
             buffer.SetGlobalFloat(ReadyId, 0f);
             buffer.SetGlobalFloat(ButtonReadyId, 0f);
             buffer.SetGlobalVector(ButtonClipUvXId, Vector4.zero);
@@ -607,11 +620,9 @@ namespace MajdataPlay.Rendering
         private static void ClearSourceBindings()
         {
             Shader.SetGlobalTexture(PanelBlurTextureId, Texture2D.blackTexture);
-            Shader.SetGlobalVector(PanelBlurTexelSizeId, Vector4.zero);
             Shader.SetGlobalTexture(BlurTextureId, Texture2D.blackTexture);
-            Shader.SetGlobalVector(BlurTexelSizeId, Vector4.zero);
             Shader.SetGlobalTexture(ButtonBlurTextureId, Texture2D.blackTexture);
-            Shader.SetGlobalVector(ButtonBlurTexelSizeId, Vector4.zero);
+            Shader.SetGlobalVector(ButtonCaptureInvSizeId, Vector4.zero);
             Shader.SetGlobalVector(ButtonClipUvXId, Vector4.zero);
             Shader.SetGlobalVector(ButtonClipUvYId, Vector4.zero);
             Shader.SetGlobalVector(ButtonClipSampleBoundsId, Vector4.zero);
@@ -653,6 +664,7 @@ namespace MajdataPlay.Rendering
         /// <summary>Disposes persistent resources only when the application exits or the runtime session resets.</summary>
         private static void ReleaseResources()
         {
+            s_capture.Invalidate();
             s_enabled = false;
             UpdateSubscriptions();
             if (s_shutdownSubscribed)
@@ -674,7 +686,6 @@ namespace MajdataPlay.Rendering
             s_halfResolutionSize = default;
             s_gaussianResolutionSize = default;
             Shader.SetGlobalVector(PanelBlurStepId, Vector4.zero);
-            Shader.SetGlobalFloat(GaussianCenterWeightId, 0f);
             Shader.SetGlobalFloat(SourcePointFilterId, 0f);
         }
 
@@ -697,21 +708,63 @@ namespace MajdataPlay.Rendering
         }
 
         /// <summary>Connects the game-owned backgrounds to MRP's three ordered scene prefixes.</summary>
-        private sealed class Capture : IMajUiCategoryBackdropCapture
+        private sealed class Capture : IMajUiBackdropCapturePlan
         {
+            /// <summary>Identifies the camera whose visibility snapshot owns the prepared stages.</summary>
+            private Camera? _camera;
+
+            /// <summary>Gets the visible stages prepared for the current camera without rescanning native UI.</summary>
+            public MajUiBackdropStages Stages { get; private set; }
+
+            /// <summary>Invalidates the camera snapshot when capture deactivates or its resources are released.</summary>
+            internal void Invalidate()
+            {
+                _camera = null;
+                Stages = MajUiBackdropStages.None;
+            }
+
             /// <summary>Requests attachments only for visible menu owners, never during gameplay.</summary>
             /// <param name="camera">The camera being prepared.</param>
             /// <returns>Whether the menu pipeline should record its ordered background sources.</returns>
             public bool IsActive(Camera camera)
             {
+                Invalidate();
                 if (!s_enabled || SceneSwitcher.CurrentScene == MajScenes.Game || camera == null
-                    || camera.cameraType != CameraType.Game || camera != SceneSwitcher.MainCamera
-                    || !HasVisibleConsumer(camera, ownersOnly: true))
+                    || camera.cameraType != CameraType.Game || camera != SceneSwitcher.MainCamera)
+                {
+                    return false;
+                }
+                var stages = GetVisibleStages(camera, out var hasOwner);
+                if (!hasOwner)
                 {
                     return false;
                 }
                 LoadResources();
-                return s_glassTemplate != null && s_blurTemplate != null;
+                if (s_glassTemplate == null || s_blurTemplate == null)
+                {
+                    return false;
+                }
+                _camera = camera;
+                Stages = stages;
+                return true;
+            }
+
+            /// <summary>Resets all stage readiness and clip mappings before any surface can consume this camera's sources.</summary>
+            /// <param name="buffer">The camera's ordered command buffer before scene drawing.</param>
+            /// <param name="camera">The camera whose prepared capture stages are about to render.</param>
+            public void BeginCamera(CommandBuffer buffer, Camera camera)
+            {
+                SetUnavailable(buffer);
+            }
+
+            /// <summary>Checks the prepared stage snapshot without repeating visibility or ownership queries.</summary>
+            /// <param name="camera">The camera whose scene prefix is being recorded.</param>
+            /// <param name="role">The requested scene-prefix role.</param>
+            /// <returns>Whether this camera has an active prepared consumer for the requested stage.</returns>
+            internal bool RequiresStage(Camera camera, UiBackdropSourceRole role)
+            {
+                return s_enabled && SceneSwitcher.CurrentScene != MajScenes.Game && _camera == camera
+                    && (Stages & GetCaptureStage(role)) != 0;
             }
 
             /// <summary>Records RT1 from scene-prefix color including the blue ring before board and background-cover drawing.</summary>
@@ -720,7 +773,6 @@ namespace MajdataPlay.Rendering
             /// <param name="resolvedColor">The borrowed scene prefix including the blue ring.</param>
             public void Record(CommandBuffer buffer, Camera camera, RenderTexture resolvedColor)
             {
-                SetUnavailable(buffer);
                 RecordStage(buffer, camera, resolvedColor, UiBackdropSourceRole.Board);
             }
 
@@ -729,8 +781,7 @@ namespace MajdataPlay.Rendering
             /// <returns>Whether the middle capture cut is needed, including Setting without a song cover.</returns>
             public bool RequiresCategoryCapture(Camera camera)
             {
-                return s_enabled && SceneSwitcher.CurrentScene != MajScenes.Game
-                    && HasVisibleConsumer(camera, UiBackdropSourceRole.Category);
+                return RequiresStage(camera, UiBackdropSourceRole.Category);
             }
 
             /// <summary>Records RT2 after board and background-song-cover drawing and before category drawing.</summary>
@@ -748,8 +799,7 @@ namespace MajdataPlay.Rendering
             /// <returns>Whether the final peripheral capture cut is needed.</returns>
             public bool RequiresButtonCapture(Camera camera)
             {
-                return s_enabled && SceneSwitcher.CurrentScene != MajScenes.Game
-                    && HasVisibleConsumer(camera, UiBackdropSourceRole.Peripheral);
+                return RequiresStage(camera, UiBackdropSourceRole.Peripheral);
             }
 
             /// <summary>Records RT3 after ordinary UI and before the eight peripheral button bodies.</summary>
@@ -775,7 +825,7 @@ namespace MajdataPlay.Rendering
                 SetUnavailable(buffer);
                 return;
             }
-            if (!HasVisibleConsumer(camera, ownersOnly: true) || !HasVisibleConsumer(camera, role))
+            if (!s_capture.RequiresStage(camera, role))
             {
                 return;
             }
@@ -793,11 +843,12 @@ namespace MajdataPlay.Rendering
             var uvX = Vector4.zero;
             var uvY = Vector4.zero;
             var sampleBounds = Vector4.zero;
-            if (role != UiBackdropSourceRole.Board)
+            if (role != UiBackdropSourceRole.Board || IsLiquidGlass)
             {
                 foreach (var panel in s_panels)
                 {
                     if (panel == null || panel.SourceRole != role ||
+                        (role == UiBackdropSourceRole.Board && !panel.ClipsLiquidBoardCapture) ||
                         (role == UiBackdropSourceRole.Peripheral && !panel.IsButton) ||
                         !panel.IsVisible || panel.RenderCamera != camera)
                     {
@@ -826,7 +877,7 @@ namespace MajdataPlay.Rendering
                         }
                     }
                 }
-                if (uvX.w > 0.5f)
+                if (role != UiBackdropSourceRole.Board && uvX.w > 0.5f)
                 {
                     var inverse = 1f / (uvX.x * uvY.y - uvX.y * uvY.x);
                     var centerX = (uvX.y * uvY.z - uvY.y * uvX.z) * inverse;
@@ -837,7 +888,11 @@ namespace MajdataPlay.Rendering
                     sampleBounds = new Vector4(centerX, centerY, Mathf.Max(0f, 1f - inset), 0f);
                 }
             }
-            if (role == UiBackdropSourceRole.Category)
+            if (role == UiBackdropSourceRole.Board)
+            {
+                buffer.SetGlobalFloat(PanelCaptureHasCoverageId, uvX.w);
+            }
+            else if (role == UiBackdropSourceRole.Category)
             {
                 buffer.SetGlobalVector(CategoryClipUvXId, uvX);
                 buffer.SetGlobalVector(CategoryClipUvYId, uvY);
@@ -871,11 +926,16 @@ namespace MajdataPlay.Rendering
                 {
                     return;
                 }
-                s_blurMaterial ??= new Material(s_blurTemplate)
+                if (s_blurMaterial == null)
                 {
-                    name = "Maj UI Ordered Background Capture",
-                    hideFlags = HideFlags.HideAndDontSave
-                };
+                    s_blurMaterial = new Material(s_blurTemplate)
+                    {
+                        name = "Maj UI Ordered Background Capture",
+                        hideFlags = HideFlags.HideAndDontSave
+                    };
+                    s_blurMaterial.SetFloat(GaussianCenterWeightId, s_gaussianCenterWeight);
+                    s_blurMaterial.SetVectorArray(GaussianPairsId, s_gaussianKernelPairs);
+                }
                 var rawSnapshot = IsLiquidGlass && role != UiBackdropSourceRole.Board;
                 var result = rawSnapshot
                     ? (role == UiBackdropSourceRole.Category ? s_liquidCategoryTexture! : s_liquidButtonTexture!)
@@ -902,8 +962,6 @@ namespace MajdataPlay.Rendering
                         buffer.SetGlobalFloat(SourcePointFilterId, 0f);
                         buffer.SetGlobalVector(PanelBlurStepId,
                             new Vector4(1f / s_gaussianResolutionSize.x, 1f / s_gaussianResolutionSize.y, 0f, 0f));
-                        buffer.SetGlobalFloat(GaussianCenterWeightId, s_gaussianCenterWeight);
-                        buffer.SetGlobalVectorArray(GaussianPairsId, s_gaussianKernelPairs);
                         buffer.Blit(result, s_blurScratchTexture!, s_blurMaterial, 1);
                         buffer.Blit(s_blurScratchTexture!, result, s_blurMaterial, 2);
                     }
@@ -914,10 +972,11 @@ namespace MajdataPlay.Rendering
                 }
                 var textureId = role == UiBackdropSourceRole.Board ? PanelBlurTextureId
                     : role == UiBackdropSourceRole.Category ? BlurTextureId : ButtonBlurTextureId;
-                var texelId = role == UiBackdropSourceRole.Board ? PanelBlurTexelSizeId
-                    : role == UiBackdropSourceRole.Category ? BlurTexelSizeId : ButtonBlurTexelSizeId;
+                if (rawSnapshot && role == UiBackdropSourceRole.Peripheral)
+                {
+                    buffer.SetGlobalVector(ButtonCaptureInvSizeId, new Vector4(1f / result.width, 1f / result.height, 0f, 0f));
+                }
                 buffer.SetGlobalTexture(textureId, result);
-                buffer.SetGlobalVector(texelId, new Vector4(1f / result.width, 1f / result.height, result.width, result.height));
                 buffer.SetGlobalFloat(readyId, 1f);
             }
             catch (Exception exception)

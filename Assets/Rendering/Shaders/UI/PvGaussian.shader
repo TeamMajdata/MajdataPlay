@@ -24,11 +24,11 @@ Shader "Hidden/Maj/UI PV Gaussian"
         float _MajUiSourceNeedsManualLinear;
         // Supplied from the actual projected output dimensions, independently of the decoded video size.
         float4 _MajPvDownsampleStep;
-        // Fixed sigma-four / radius-eight Gaussian on the quarter-resolution grid.
+        // Fixed sigma-three / radius-six Gaussian on the quarter-resolution grid.
         // Each XY pair stores (weight, bilinear offset), shared by both filter axes.
         float4 _MajUiPanelBlurStep;
         half _MajUiGaussianCenterWeight;
-        float4 _MajUiGaussianPairs[4];
+        float4 _MajUiGaussianPairs[3];
         // The active RT2/RT3 capture publishes its main-display circle. Alpha stores
         // valid coverage independently of scene colors and the camera attachment's alpha.
         float4 _MajUiCaptureClipUvX;
@@ -141,7 +141,7 @@ Shader "Hidden/Maj/UI PV Gaussian"
         {
             half4 color = SampleLinearClamp(uv) * _MajUiGaussianCenterWeight;
             [unroll]
-            for (int pair = 0; pair < 4; pair++)
+            for (int pair = 0; pair < 3; pair++)
             {
                 float2 packed = _MajUiGaussianPairs[pair].xy;
                 half weight = packed.x;

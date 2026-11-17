@@ -55,6 +55,34 @@ namespace MajdataPlay.Rendering
         void RecordCategories(CommandBuffer buffer, Camera camera, RenderTexture resolvedColor);
     }
 
+    /// <summary>Identifies the ordered scene prefixes requested for one prepared camera.</summary>
+    [Flags]
+    public enum MajUiBackdropStages
+    {
+        /// <summary>No scene prefix is requested.</summary>
+        None = 0,
+        /// <summary>Captures the background before large boards and the background song cover.</summary>
+        Board = 1,
+        /// <summary>Captures completed boards and the background song cover before categories.</summary>
+        Category = 2,
+        /// <summary>Captures ordinary foreground UI before peripheral surfaces.</summary>
+        Peripheral = 4
+    }
+
+    /// <summary>Optionally supplies one prepared stage plan and camera-state initialization independently of its first capture.</summary>
+    /// <remarks>Consumers without this interface retain the original mandatory first-stage callback.</remarks>
+    public interface IMajUiBackdropCapturePlan : IMajUiCategoryBackdropCapture
+    {
+        /// <summary>Gets the stages prepared by the most recent successful activation query for this camera.</summary>
+        MajUiBackdropStages Stages { get; }
+
+        /// <summary>Initializes consumer state before camera geometry, even when the board capture is skipped.</summary>
+        /// <param name="buffer">The camera's ordered graphics command buffer.</param>
+        /// <param name="camera">The camera whose active stage plan is about to render.</param>
+        /// <remarks>This callback must not switch render targets or begin or end a render pass.</remarks>
+        void BeginCamera(CommandBuffer buffer, Camera camera);
+    }
+
     /// <summary>Registers an optional UI backdrop consumer without depending on game scripts or an effect implementation.</summary>
     public static class MajUiBackdropBridge
     {
@@ -125,6 +153,47 @@ namespace MajdataPlay.Rendering
             }
         }
 
+        /// <summary>Gets the first capture cut while preserving mandatory callbacks for legacy consumers.</summary>
+        /// <param name="capture">The already active consumer, or null when capture is inactive.</param>
+        /// <param name="camera">The camera whose prepared stages are being selected.</param>
+        /// <returns>The board-stage consumer, including legacy consumers, or null when the stage is not requested.</returns>
+        internal static IMajUiBackdropCapture? GetActiveBoard(IMajUiBackdropCapture? capture, Camera camera)
+        {
+            if (capture is not IMajUiBackdropCapturePlan plan)
+            {
+                return capture;
+            }
+            try
+            {
+                return (plan.Stages & MajUiBackdropStages.Board) != 0 ? capture : null;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, camera);
+                return null;
+            }
+        }
+
+        /// <summary>Initializes an optional prepared consumer without introducing a scene-prefix capture.</summary>
+        /// <param name="capture">The active consumer, or null when capture is inactive.</param>
+        /// <param name="buffer">The ordered camera command stream before any geometry is drawn.</param>
+        /// <param name="camera">The camera whose prepared stages are about to render.</param>
+        internal static void BeginCamera(IMajUiBackdropCapture? capture, CommandBuffer buffer, Camera camera)
+        {
+            if (capture is not IMajUiBackdropCapturePlan plan)
+            {
+                return;
+            }
+            try
+            {
+                plan.BeginCamera(buffer, camera);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, camera);
+            }
+        }
+
         /// <summary>Checks an optional second-stage requirement without changing the first-stage registration.</summary>
         /// <param name="capture">The already active first-stage consumer, or null when capture is inactive.</param>
         /// <param name="camera">The camera whose optional button capture is being prepared.</param>
@@ -137,7 +206,10 @@ namespace MajdataPlay.Rendering
             }
             try
             {
-                return buttons.RequiresButtonCapture(camera) ? buttons : null;
+                var requested = capture is IMajUiBackdropCapturePlan plan
+                    ? (plan.Stages & MajUiBackdropStages.Peripheral) != 0
+                    : buttons.RequiresButtonCapture(camera);
+                return requested ? buttons : null;
             }
             catch (Exception exception)
             {
@@ -158,7 +230,10 @@ namespace MajdataPlay.Rendering
             }
             try
             {
-                return categories.RequiresCategoryCapture(camera) ? categories : null;
+                var requested = capture is IMajUiBackdropCapturePlan plan
+                    ? (plan.Stages & MajUiBackdropStages.Category) != 0
+                    : categories.RequiresCategoryCapture(camera);
+                return requested ? categories : null;
             }
             catch (Exception exception)
             {

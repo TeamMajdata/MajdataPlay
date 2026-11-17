@@ -98,6 +98,16 @@ namespace MajdataPlay.Rendering
         [Range(0.25f, 2f)]
         private float _liquidRefractionWidthScale = 1f;
 
+        /// <summary>Suppresses the narrow liquid glint on surfaces with a strongly defined Sprite edge.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("LiquidSuppressContourGlint")]
+        private bool _liquidSuppressContourGlint;
+
+        /// <summary>Excludes the circular display mask from this liquid board's shared background filter.</summary>
+        [SerializeField]
+        [FormerlySerializedAs("LiquidClipBoardCapture")]
+        private bool _liquidClipBoardCapture;
+
         /// <summary>Samples a solid part of the Sprite instead of an embedded symbol when identifying its fill.</summary>
         [SerializeField]
         [FormerlySerializedAs("FillSamplePosition")]
@@ -230,6 +240,9 @@ namespace MajdataPlay.Rendering
         /// <summary>Identifies the category role whose queue and readiness selector belong to the cached variant.</summary>
         private bool _materialIsCategory;
 
+        /// <summary>Identifies board and embedded card surfaces sharing the liquid panel transmission policy.</summary>
+        private bool _liquidIsPanel;
+
         /// <summary>Identifies the scene prefix and draw stage owned by the cached material.</summary>
         private UiBackdropSourceRole _materialSourceRole;
 
@@ -329,8 +342,11 @@ namespace MajdataPlay.Rendering
         /// <summary>Gets whether this panel consumes the final snapshot after categories have rendered.</summary>
         internal bool IsButton => _isButton && !_isCategory;
 
-        /// <summary>Gets the authored display circle followed by category consumers and physical peripheral buttons after layout.</summary>
+        /// <summary>Gets the authored display circle used by consumers with circular backdrop coverage.</summary>
         internal RectTransform? MainDisplayRect { get; private set; }
+
+        /// <summary>Gets whether this board filters only the valid area inside the display circle.</summary>
+        internal bool ClipsLiquidBoardCapture => _liquidClipBoardCapture && UiPvBackdropBlur.IsLiquidGlass;
 
         /// <summary>Gets whether this panel and its foreground retain native order in the category stage.</summary>
         internal bool IsCategory => _isCategory;
@@ -393,7 +409,7 @@ namespace MajdataPlay.Rendering
         {
             _image = GetComponent<QualityUiImage>();
             MainDisplayRect = null;
-            if (IsButton || SourceRole == UiBackdropSourceRole.Category)
+            if (IsButton || _liquidClipBoardCapture || SourceRole == UiBackdropSourceRole.Category)
             {
                 for (var ancestor = transform.parent; ancestor != null; ancestor = ancestor.parent)
                 {
@@ -596,7 +612,8 @@ namespace MajdataPlay.Rendering
             var nativeContour = sprite == null && _materialIsRoundedRect && image.type == Image.Type.Simple &&
                 !image.useSpriteMesh && !IsButton && !_liquidEllipse && !_liquidClippedCircle &&
                 rect.width > 0f && rect.height > 0f;
-            if (UiAtlasMeshGenerator.TryGetLegacy(sprite, out var legacy, out _))
+            var usesLegacyMesh = UiAtlasMeshGenerator.TryGetLegacy(sprite, out var legacy, out _);
+            if (usesLegacyMesh)
             {
                 sprite = legacy;
             }
@@ -646,6 +663,7 @@ namespace MajdataPlay.Rendering
             {
                 sourceRect = opticalContour.Rect;
                 sourceCorners = opticalContour.Corners;
+                logicalRect = GetLiquidBodyRect(image, sprite!, rect, in opticalContour, usesLegacyMesh);
             }
             if (sprite == null)
             {
@@ -679,7 +697,8 @@ namespace MajdataPlay.Rendering
             // A missing serialized value retains one, so unrelated controls keep their current optics.
             bevelWidth *= Mathf.Clamp(_liquidRefractionWidthScale, 0.25f, 2f);
             // A 1.2 thickness-to-width ratio retains an ordered inward lens without image folds.
-            var optics = new Vector4(bevelWidth, bevelWidth * 1.2f, 1.5f * unitsPerDesignUnit, 0.875f * unitsPerDesignUnit);
+            var reflectionScale = _liquidSuppressContourGlint ? 0f : unitsPerDesignUnit;
+            var optics = new Vector4(bevelWidth, bevelWidth * 1.2f, 1.5f * reflectionScale, 0.875f * reflectionScale);
             var artworkProtection = hasOpticalContour && _liquidOriginalArtworkLeft.x > 0f
                 ? new Vector4((Mathf.Clamp01(_liquidOriginalArtworkLeft.x) - 0.5f) * opticalContour.Size.x,
                     Mathf.Clamp(_liquidOriginalArtworkLeft.y, 0f, 0.5f) * opticalContour.Size.x, 1f, 0f)
@@ -722,6 +741,90 @@ namespace MajdataPlay.Rendering
                 SetLiquidGeometry(rendered);
             }
             _liquidRenderMaterial = rendered;
+        }
+
+        /// <summary>Maps the authored visible body into local UI coordinates without changing the optical geometry.</summary>
+        /// <param name="image">The control supplying its native slice and pixel-density settings.</param>
+        /// <param name="sprite">The original logical Sprite before outline expansion.</param>
+        /// <param name="rect">The pixel-adjusted drawing rectangle, including any preserved-aspect adjustment.</param>
+        /// <param name="contour">The visible source body within the original Sprite rectangle.</param>
+        /// <param name="usesLegacyMesh">Whether the atlas mesh helper already adopted the pixel-adjusted drawing rectangle.</param>
+        /// <returns>The local body center and half size used by surface lighting.</returns>
+        private static Vector4 GetLiquidBodyRect(QualityUiImage image, Sprite sprite, Rect rect,
+            in UiGlassOpticsAtlas.Contour contour, bool usesLegacyMesh)
+        {
+            var sourceSize = contour.Size;
+            var sourceRect = contour.Rect;
+            var sourceMinimum = new Vector2(sourceRect.x - sourceRect.z, sourceRect.y - sourceRect.w) + sourceSize * 0.5f;
+            var sourceMaximum = new Vector2(sourceRect.x + sourceRect.z, sourceRect.y + sourceRect.w) + sourceSize * 0.5f;
+            var minimum = rect.min;
+            var maximum = rect.max;
+            var border = sprite.border;
+            if (image.type == Image.Type.Sliced && border.sqrMagnitude > 0f)
+            {
+                var reference = image.canvas != null ? image.canvas.referencePixelsPerUnit : 100f;
+                var pixelsPerUnit = sprite.pixelsPerUnit / reference * image.pixelsPerUnitMultiplier;
+                var padding = UnityEngine.Sprites.DataUtility.GetPadding(sprite);
+                var originalSize = image.rectTransform.rect.size;
+                // The atlas mesh generator draws the legacy Sprite in an already pixel-adjusted rect.
+                // Match its fixed border segments and independently stretched center on each axis.
+                for (var axis = 0; axis < 2; axis++)
+                {
+                    var sourceBorder = new Vector2(border[axis], border[axis + 2]);
+                    var sourcePadding = new Vector2(padding[axis], padding[axis + 2]);
+                    var borderScale = usesLegacyMesh || originalSize[axis] == 0f ? 1f : rect.size[axis] / originalSize[axis];
+                    minimum[axis] = rect.min[axis] + MapSlicedCoordinate(sourceMinimum[axis], sourceSize[axis],
+                        rect.size[axis], sourceBorder, sourcePadding, pixelsPerUnit, borderScale);
+                    maximum[axis] = rect.min[axis] + MapSlicedCoordinate(sourceMaximum[axis], sourceSize[axis],
+                        rect.size[axis], sourceBorder, sourcePadding, pixelsPerUnit, borderScale);
+                }
+            }
+            else
+            {
+                var scale = new Vector2(rect.width / sourceSize.x, rect.height / sourceSize.y);
+                minimum += Vector2.Scale(sourceMinimum, scale);
+                maximum = rect.min + Vector2.Scale(sourceMaximum, scale);
+            }
+            var center = (minimum + maximum) * 0.5f;
+            var halfSize = (maximum - minimum) * 0.5f;
+            return new Vector4(center.x, center.y, Mathf.Max(halfSize.x, 0.0001f), Mathf.Max(halfSize.y, 0.0001f));
+        }
+
+        /// <summary>Maps a source coordinate through the same three segments as Unity's sliced Image mesh.</summary>
+        /// <param name="position">The coordinate measured from the original Sprite's lower or left edge.</param>
+        /// <param name="sourceLength">The original Sprite extent along the selected axis.</param>
+        /// <param name="targetLength">The pixel-adjusted UI extent along the selected axis.</param>
+        /// <param name="border">The near and far source border widths.</param>
+        /// <param name="padding">The near and far transparent source margins omitted by the Sprite mesh.</param>
+        /// <param name="pixelsPerUnit">The Sprite-to-Canvas pixel density including the Image multiplier.</param>
+        /// <param name="borderScale">The border correction between the native and pixel-adjusted rectangles.</param>
+        /// <returns>The corresponding local distance from the UI rectangle's lower or left edge.</returns>
+        private static float MapSlicedCoordinate(float position, float sourceLength, float targetLength,
+            Vector2 border, Vector2 padding, float pixelsPerUnit, float borderScale)
+        {
+            var near = border.x / pixelsPerUnit * borderScale;
+            var far = border.y / pixelsPerUnit * borderScale;
+            var combined = near + far;
+            if (combined > targetLength)
+            {
+                var scale = targetLength / combined;
+                near *= scale;
+                far *= scale;
+            }
+            if (position <= border.x && border.x > padding.x)
+            {
+                return Mathf.LerpUnclamped(padding.x / pixelsPerUnit, near,
+                    (position - padding.x) / (border.x - padding.x));
+            }
+            if (position >= sourceLength - border.y && border.y > padding.y)
+            {
+                return Mathf.LerpUnclamped(targetLength - far, targetLength - padding.y / pixelsPerUnit,
+                    (position - sourceLength + border.y) / (border.y - padding.y));
+            }
+            var centerLength = sourceLength - border.x - border.y;
+            return centerLength > 0f
+                ? Mathf.LerpUnclamped(near, targetLength - far, (position - border.x) / centerLength)
+                : near;
         }
 
         /// <summary>Describes the authored source contour for both offline baking and runtime lookup.</summary>
@@ -789,8 +892,8 @@ namespace MajdataPlay.Rendering
                 _liquidArtworkContour ? Mathf.Clamp01(_fillAlpha) * 0.5f : 0f);
         }
 
-        /// <summary>Refreshes the explicit source's actual texture, fill UV and working-space color without rebuilding materials.</summary>
-        /// <returns>True when an owned or stencil material needs an updated source binding.</returns>
+        /// <summary>Refreshes the liquid panel policy and inherited tint without rebuilding materials.</summary>
+        /// <returns>True when an owned or stencil material needs updated surface properties.</returns>
         private bool UpdateLiquidTintSource()
         {
             Texture? texture = null;
@@ -829,8 +932,12 @@ namespace MajdataPlay.Rendering
                         graphic.b * materialTint.z, Mathf.Clamp01(_liquidSourceTintStrength));
                 }
             }
-            var changed = !_liquidSourceTintInitialized || _liquidSourceTexture != texture ||
+            // Losing an inherited source may change surface parameters, but never the draw queue or shader.
+            var isPanel = UsesStrongBlur || (IsCategory && !_materialIsRoundedRect)
+                || (!IsButton && !IsCategory && !_usePeripheralBackdrop && source != null);
+            var changed = !_liquidSourceTintInitialized || _liquidIsPanel != isPanel || _liquidSourceTexture != texture ||
                 _liquidSourceUv != fillUv || _liquidSourceColor != color;
+            _liquidIsPanel = isPanel;
             _liquidSourceTexture = texture;
             _liquidSourceUv = fillUv;
             _liquidSourceColor = color;
@@ -843,6 +950,7 @@ namespace MajdataPlay.Rendering
         private void SetLiquidGeometry(Material material)
         {
             SetStyleKeyword(material);
+            material.SetFloat("_BackdropIsPanel", _liquidIsPanel ? 1f : 0f);
             material.SetVector("_LiquidArtworkProtection", _liquidArtworkProtection);
             var contourTexture = _bakedContourTexture != null ? _bakedContourTexture : Texture2D.blackTexture;
             material.SetTexture("_LiquidContourTex", contourTexture);
@@ -1055,6 +1163,7 @@ namespace MajdataPlay.Rendering
             _materialIsRoundedRect = false;
             _materialIsButton = false;
             _materialIsCategory = false;
+            _liquidIsPanel = false;
             _materialSourceRole = default;
             _materialUsesStrongBlur = false;
             _liquidGeometryInitialized = false;

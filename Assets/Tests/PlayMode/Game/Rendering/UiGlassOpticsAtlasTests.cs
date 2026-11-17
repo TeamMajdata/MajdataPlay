@@ -466,8 +466,138 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
         }
 
-        /// <summary>Checks authored rim lighting remains visible outside the later cover on bright and dark backgrounds, with directional glints and a real composited shadow.</summary>
-        /// <returns>The same-ring, visible-annulus highlight and shadow regressions.</returns>
+        /// <summary>Checks half-size RT3 refraction cannot create dark specks on a subpixel cover-frame silhouette without MSAA.</summary>
+        /// <returns>The real capture layout, fractional-scale fringe, opaque refraction and unchanged-alpha regression.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator CoverFrame_HalfRt3KeepsFractionalFringesClearWithoutMsaa()
+        {
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            var image = CreateAuthoredDecoration(canvas, "Assets/Prefabs/List/Model/SongCoverDisplayer.prefab", 5322621527391851573L);
+            var ring = CreateAuthoredDecoration(canvas, "Assets/Prefabs/List/Model/SongCoverDisplayer.prefab", 900000000000000303L);
+            ring.color = Color.white;
+            typeof(QualityUiImage).GetField("_glassInlaySource", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(image, ring);
+            const int size = 512;
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear) { antiAliasing = 1 });
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            var source = _objects.Track(new Texture2D(size, size, TextureFormat.RGBA32, false, true)
+            {
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            });
+            var descriptor = (RenderTextureDescriptor)typeof(UiPvBackdropBlur).GetMethod("CreateDescriptor", BindingFlags.NonPublic | BindingFlags.Static)!
+                .Invoke(null, new object[] { new Vector2Int(size / 2, size / 2) })!;
+            var capture = _objects.Track(new RenderTexture(descriptor) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp });
+            var captureReader = _objects.Track(new Texture2D(size / 2, size / 2, TextureFormat.RGBAFloat, false, true));
+            var copy = _objects.Track(new Material(Shader.Find("Hidden/Maj/UI PV Gaussian")));
+            copy.SetVector("_MajUiCaptureClipUvX", Vector4.zero);
+            Assert.That(target.Create() && resolved.Create() && capture.Create(), Is.True);
+            Assert.That(target.antiAliasing, Is.EqualTo(1), "The regression must exercise the actual MSAA-off path.");
+            Assert.That(capture.useMipMap, Is.False);
+            var background = new Color(0.94f, 0.93f, 0.9f, 1f);
+            var backgroundDetail = new Color(0.90f, 0.88f, 0.85f, 1f);
+            var difficulty = new Color(0.65f, 0.04f, 0.95f, 1f);
+            var prefix = new Color[size * size];
+            foreach (var extent in new[] { 175f, 365f })
+            {
+                image.rectTransform.sizeDelta = Vector2.one * extent;
+                ring.rectTransform.sizeDelta = Vector2.one * (extent * 310f / 365f);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                var material = _objects.Track(new Material(image.materialForRendering));
+                material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                material.SetFloat("_ListDepthOffset", 0f);
+                material.SetColor("_ShadowColor", Color.clear);
+                var refraction = material.GetFloat("_Refraction");
+                Assert.That(refraction, Is.GreaterThan(0f));
+                foreach (var phase in new[] { new Vector3(1f, 0f, 0f), new Vector3(0.9975f, 0.25f, 0.5f), new Vector3(1.003f, 0.5f, 0.25f) })
+                {
+                    var center = Vector2.one * (size * 0.5f) + new Vector2(phase.y, phase.z);
+                    var frameRadius = material.GetFloat("_Radius") * extent * phase.x;
+                    var ringRadius = extent * phase.x * 310f / 365f * 0.5f;
+                    var coverRadius = extent * phase.x * 285f / 365f * 0.5f;
+                    // Stress the captured ring with a black center and a pale textured background.
+                    // The white frame is still absent from this half-copy, just as in production.
+                    for (var y = 0; y < size; y++)
+                    {
+                        for (var x = 0; x < size; x++)
+                        {
+                            var radius = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), center);
+                            var ringAlpha = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(ringRadius - 0.5f, ringRadius + 0.5f, radius));
+                            var coverAlpha = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(coverRadius - 0.5f, coverRadius + 0.5f, radius));
+                            var underlay = x % 6 < 3 ? backgroundDetail : background;
+                            prefix[y * size + x] = Color.Lerp(Color.Lerp(underlay, difficulty, ringAlpha), Color.black, coverAlpha);
+                        }
+                    }
+                    source.SetPixels(prefix);
+                    source.Apply(false, false);
+                    Graphics.Blit(source, capture, copy, 3);
+                    RenderTexture.active = capture;
+                    captureReader.ReadPixels(new Rect(0, 0, capture.width, capture.height), 0, 0);
+                    captureReader.Apply(false, false);
+                    Assert.That(captureReader.GetPixel(capture.width / 2, capture.height / 2).grayscale, Is.LessThan(0.001f), "The captured cover must really be black.");
+                    var shoulder = (center + Vector2.right * (frameRadius - 0.25f)) * 0.5f;
+                    Assert.That(captureReader.GetPixel(Mathf.RoundToInt(shoulder.x), Mathf.RoundToInt(shoulder.y)).grayscale, Is.GreaterThan(0.85f), "The unfinished RT3 shoulder must contain the ordinary background, not a prepainted white frame.");
+                    SetCapture(capture);
+                    Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                    var mesh = BuildMesh(image);
+                    var vertices = mesh.vertices;
+                    for (var index = 0; index < vertices.Length; index++)
+                    {
+                        vertices[index] = vertices[index] * phase.x + new Vector3(phase.y, phase.z, 0f);
+                    }
+                    mesh.vertices = vertices;
+                    mesh.RecalculateBounds();
+                    material.SetFloat("_Refraction", 0f);
+                    var unwarped = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    material.SetFloat("_Refraction", refraction);
+                    var warped = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    AssertAlphaEqual(unwarped, warped, "Capture displacement must not alter the frame silhouette.");
+                    var fringeDifference = 0f;
+                    var interiorDifference = 0f;
+                    var minimumShoulder = 1f;
+                    var fringeSamples = 0;
+                    var previewFlat = new Color[prefix.Length];
+                    var previewWarped = new Color[prefix.Length];
+                    for (var y = 0; y < size; y++)
+                    {
+                        for (var x = 0; x < size; x++)
+                        {
+                            var index = y * size + x;
+                            var radius = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), center);
+                            var difference = warped[index] - unwarped[index];
+                            var rgbDifference = Mathf.Max(Mathf.Abs(difference.r), Mathf.Max(Mathf.Abs(difference.g), Mathf.Abs(difference.b)));
+                            if (Mathf.Abs(radius - frameRadius) < 1.5f && warped[index].a > 0f && warped[index].a < 1f)
+                            {
+                                fringeDifference = Mathf.Max(fringeDifference, rgbDifference);
+                                var composed = warped[index] + prefix[index] * (1f - warped[index].a);
+                                minimumShoulder = Mathf.Min(minimumShoulder, Mathf.Min(composed.r, Mathf.Min(composed.g, composed.b)));
+                                fringeSamples++;
+                            }
+                            else if (radius < frameRadius - 1f && warped[index].a > 0.999f)
+                            {
+                                interiorDifference = Mathf.Max(interiorDifference, rgbDifference);
+                            }
+                            previewFlat[index] = unwarped[index] + prefix[index] * (1f - unwarped[index].a);
+                            previewWarped[index] = warped[index] + prefix[index] * (1f - warped[index].a);
+                        }
+                    }
+                    WriteWhiteEdgePreview($"CoverHalfRt3-{extent:F0}-{phase.x:F4}-{phase.y:F2}-{phase.z:F2}", previewFlat, previewWarped, size);
+                    TestContext.WriteLine($"COVER_RT3_FRINGE extent={extent:F0} scale={phase.x:F4} phase={phase.y:F2},{phase.z:F2} samples={target.antiAliasing} fringe={fringeSamples} fringeDifference={fringeDifference:F7} minimumShoulder={minimumShoulder:F5} interiorDifference={interiorDifference:F6}");
+                    Assert.That(fringeSamples, Is.GreaterThan(64));
+                    Assert.That(fringeDifference, Is.LessThan(0.00001f), "The partially covered outer contour must retain the stable unshifted capture sample.");
+                    Assert.That(minimumShoulder, Is.GreaterThan(0.75f), "The pale outer shoulder must not acquire isolated black capture specks.");
+                    Assert.That(interiorDifference, Is.GreaterThan(0.005f), "The fully covered annulus must still refract the real colored-ring and black-cover prefix.");
+                }
+            }
+        }
+
+        /// <summary>Checks the visible cover frame has a softly shaded face, white reflections and an independent exterior shadow.</summary>
+        /// <returns>The real white annulus, captured inlay, broad highlight and composited-shadow regressions.</returns>
         [UnityTest]
         [Category("GPU")]
         public IEnumerator CoverRimLighting_VisibleBandReflectsOnBothBackgroundsAndCastsShadow()
@@ -505,7 +635,8 @@ namespace MajdataPlay.Tests.Game.Rendering
             var ringRadius = 0.5f * 310f / 365f * pixelScale;
             var strength = material.GetFloat("_HighlightStrength");
             var shadow = material.GetColor("_ShadowColor");
-            foreach (var background in new[] { new Color(0.12f, 0.12f, 0.12f, 1f), new Color(0.85f, 0.85f, 0.85f, 1f) })
+            var whiteCaptureMiddle = 0f;
+            foreach (var background in new[] { Color.white, new Color(0.12f, 0.12f, 0.12f, 1f) })
             {
                 for (var y = 0; y < capture.height; y++)
                 {
@@ -522,78 +653,39 @@ namespace MajdataPlay.Tests.Game.Rendering
                 var flat = Draw(image, material, mesh, target, resolved, reader, 1, axisAligned: true);
                 material.SetFloat("_HighlightStrength", strength);
                 var lit = Draw(image, material, mesh, target, resolved, reader, 1, axisAligned: true);
-                AssertAlphaEqual(flat, lit, "Lighting must not change the silhouette, coverage or shadow footprint.");
-                var weakest = float.MaxValue;
-                var front = 0f;
-                var back = 0f;
-                var frontCount = 0;
-                var backCount = 0;
-                for (var angle = 0; angle < 48; angle++)
+                AssertAlphaEqual(flat, lit, "Face lighting must not change the silhouette, coverage or shadow footprint.");
+                var faceRadius = (ringRadius + frameRadius) * 0.5f;
+                Assert.That(faceRadius, Is.GreaterThan(coverRadius + 2f));
+                var face = new Color[3];
+                var flatFace = new Color[3];
+                for (var band = 0; band < face.Length; band++)
                 {
-                    var radians = angle * Mathf.PI * 2f / 48f;
-                    var normal = new Vector2(Mathf.Cos(radians), Mathf.Sin(radians));
-                    var peak = 0f;
-                    for (var radial = -4; radial <= 1; radial++)
-                    {
-                        var radius = frameRadius + radial;
-                        Assert.That(radius, Is.GreaterThan(coverRadius + 1f), "The glint probe must remain outside the later cover's occlusion.");
-                        var point = normal * radius + Vector2.one * (size * 0.5f);
-                        var index = Mathf.Clamp(Mathf.RoundToInt(point.y), 0, size - 1) * size + Mathf.Clamp(Mathf.RoundToInt(point.x), 0, size - 1);
-                        if (flat[index].a > 0.25f)
-                        {
-                            var lift = (lit[index] - flat[index]) / flat[index].a;
-                            peak = Mathf.Max(peak, Mathf.Max(lift.r, Mathf.Max(lift.g, lift.b)));
-                        }
-                    }
-                    weakest = Mathf.Min(weakest, peak);
-                    var alignment = Vector2.Dot(normal, new Vector2(-0.6f, 0.8f));
-                    if (alignment > 0.6f)
-                    {
-                        front += peak;
-                        frontCount++;
-                    }
-                    else if (alignment < -0.6f)
-                    {
-                        back += peak;
-                        backCount++;
-                    }
+                    var angle = (band - 1) * Mathf.PI * 0.25f;
+                    var point = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * faceRadius + Vector2.one * (size * 0.5f);
+                    face[band] = AverageInteriorRgb(lit, size, point, 1, 1);
+                    flatFace[band] = AverageInteriorRgb(flat, size, point, 1, 1);
                 }
-                Assert.That(weakest, Is.GreaterThan(0.005f), "Even the off-light edge needs a visible soft glint on pale backgrounds.");
-                Assert.That(front / frontCount, Is.GreaterThan(back / backCount * 1.15f), "The rim must retain a directional response instead of an evenly bright white outline.");
-                // Probe the visible WHITE lip, excluding both the later cover and the captured colored ring.
-                var width = material.GetFloat("_HighlightWidth");
-                var sigma = width * 7f / 12f;
-                var lipRadius = frameRadius - (width + 2f * Mathf.Sqrt(sigma * sigma + 1f / (12f * pixelScale * pixelScale))) * pixelScale;
-                var lipDrop = 0f;
-                var lipSamples = 0;
-                for (var angle = 0; angle < 48; angle++)
+                Assert.That(face[2].grayscale, Is.GreaterThan(face[1].grayscale + 0.003f), "The visible upper white annulus must have a soft face highlight.");
+                Assert.That(face[0].grayscale, Is.GreaterThan(face[1].grayscale + 0.002f), "The white annulus needs a lower soft reflection rather than a hard dark bevel.");
+                var centerDrop = flatFace[1].grayscale - face[1].grayscale;
+                if (background.r > 0.5f)
                 {
-                    var radians = angle * Mathf.PI * 2f / 48f;
-                    var normal = new Vector2(Mathf.Cos(radians), Mathf.Sin(radians));
-                    if (Vector2.Dot(normal, new Vector2(-0.6f, 0.8f)) > -0.8f)
-                    {
-                        continue;
-                    }
-                    for (var offset = -1; offset <= 1; offset++)
-                    {
-                        var radius = lipRadius + offset;
-                        Assert.That(radius, Is.GreaterThan(Mathf.Max(coverRadius, ringRadius) + 1f));
-                        Assert.That(radius, Is.LessThan(frameRadius - 2f));
-                        var point = normal * radius + Vector2.one * (size * 0.5f);
-                        var index = Mathf.RoundToInt(point.y) * size + Mathf.RoundToInt(point.x);
-                        Assert.That(flat[index].a, Is.GreaterThan(0.99f), "The lip probe must be inside the actual opaque white annulus.");
-                        var baseline = flat[index] + background * (1f - flat[index].a);
-                        var shaded = lit[index] + background * (1f - lit[index].a);
-                        var drop = baseline - shaded;
-                        lipDrop += drop.r * 0.2126f + drop.g * 0.7152f + drop.b * 0.0722f;
-                        lipSamples++;
-                    }
+                    Assert.That(centerDrop / flatFace[1].grayscale, Is.InRange(0.03f, 0.08f), "The white frame's middle face must have restrained relative absorption over a white capture.");
+                    whiteCaptureMiddle = face[1].grayscale;
                 }
-                Assert.That(lipSamples, Is.GreaterThanOrEqualTo(24));
-                lipDrop /= lipSamples;
-                Assert.That(lipDrop, Is.GreaterThan(background.r > 0.5f ? 0.025f : 0.006f),
-                    "The visible opposite white lip must become measurably darker after all reflections are composed, rather than having its shade cancelled by broad light.");
-                var purplePoint = new Vector2(-0.6f, 0.8f) * ((coverRadius + ringRadius) * 0.5f) + Vector2.one * (size * 0.5f);
+                else
+                {
+                    Assert.That(whiteCaptureMiddle - face[1].grayscale, Is.GreaterThan(0.25f),
+                        "Dark-capture reflections may lift the middle, but the frame must retain a clear transmitted response instead of becoming a white veil.");
+                }
+                foreach (var side in new[] { -1f, 1f })
+                {
+                    var point = new Vector2(size * 0.5f, size * 0.5f + side * (frameRadius - 2f));
+                    var edge = AverageInteriorRgb(lit, size, point, 1, 0);
+                    Assert.That(edge.grayscale, Is.GreaterThan(face[side < 0 ? 0 : 2].grayscale + 0.003f),
+                        "Both visible arcs need a white contour reflection rather than a black outline.");
+                }
+                var purplePoint = Vector2.up * ((coverRadius + ringRadius) * 0.5f) + Vector2.one * (size * 0.5f);
                 var purpleIndex = Mathf.RoundToInt(purplePoint.y) * size + Mathf.RoundToInt(purplePoint.x);
                 Assert.That(lit[purpleIndex].g - flat[purpleIndex].g, Is.GreaterThan(0.005f), "A saturated colored inlay must retain an independent visible reflection.");
                 material.SetFloat("_HighlightStrength", 0f);
@@ -637,7 +729,131 @@ namespace MajdataPlay.Tests.Game.Rendering
                 var meanShadowDrop = totalShadowDrop / shadowSamples;
                 Assert.That(meanShadowDrop, Is.GreaterThan(background.r * 0.025f), "The distributed shadow must survive actual RGB composition, not only an isolated peak.");
                 Assert.That(maximumShadowDrop, Is.GreaterThan(background.r > 0.5f ? 0.02f : 0.002f), "The authored shadow must measurably darken the actual composited background outside the glass.");
-                TestContext.WriteLine($"COVER_RIM background={background.r:F2} floor={weakest:F5} front={front / frontCount:F5} back={back / backCount:F5} lip={lipDrop:F5} shadow={maximumShadowDrop:F5} shadowMean={meanShadowDrop:F5} shadowArcs={broadShadowAngles}");
+                WriteWhiteEdgePreview($"CoverFace-{(background.r > 0.5f ? "White" : "Dark")}", flat, lit, size);
+                TestContext.WriteLine($"COVER_FACE background={background.r:F2} bottom={face[0].grayscale:F5} middle={face[1].grayscale:F5} top={face[2].grayscale:F5} shade={centerDrop:F5} shadow={maximumShadowDrop:F5} shadowMean={meanShadowDrop:F5} shadowArcs={broadShadowAngles}");
+            }
+        }
+
+        /// <summary>Checks the actual small and center cover frames cast a detached soft shadow instead of a dark rail at their outer contour.</summary>
+        /// <returns>The native-size, white/dark-background radial-shadow and unchanged-cover-coverage regression.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator CoverFrame_OuterShadowStartsSoftlyAtAuthoredSizes()
+        {
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            var image = CreateAuthoredDecoration(canvas, "Assets/Prefabs/List/Model/SongCoverDisplayer.prefab", 5322621527391851573L);
+            var ring = CreateAuthoredDecoration(canvas, "Assets/Prefabs/List/Model/SongCoverDisplayer.prefab", 900000000000000303L);
+            ring.color = Color.white;
+            typeof(QualityUiImage).GetField("_glassInlaySource", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(image, ring);
+            const int size = 512;
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            var capture = _objects.Track(new Texture2D(1, 1, TextureFormat.RGBAFloat, false, true));
+            Assert.That(target.Create() && resolved.Create(), Is.True);
+
+            // Reconstruct physical positions from the resolved readback; no lighting equation is reproduced here.
+            Color CompositeAt(Color[] pixels, Vector2 point, Color background)
+            {
+                var coordinate = point - Vector2.one * 0.5f;
+                var x = Mathf.FloorToInt(coordinate.x);
+                var y = Mathf.FloorToInt(coordinate.y);
+                var color = Color.Lerp(Color.Lerp(pixels[y * size + x], pixels[y * size + x + 1], coordinate.x - x),
+                    Color.Lerp(pixels[(y + 1) * size + x], pixels[(y + 1) * size + x + 1], coordinate.x - x), coordinate.y - y);
+                return new Color(color.r + background.r * (1f - color.a), color.g + background.g * (1f - color.a),
+                    color.b + background.b * (1f - color.a), 1f);
+            }
+
+            // The authored side frame is 175 UI units; the selected cover uses 365 without changing its shape.
+            foreach (var extent in new[] { 175f, 365f })
+            {
+                image.rectTransform.sizeDelta = Vector2.one * extent;
+                ring.rectTransform.sizeDelta = Vector2.one * (extent * 310f / 365f);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                var material = _objects.Track(new Material(image.materialForRendering));
+                material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                material.SetFloat("_ListDepthOffset", 0f);
+                material.SetFloat("_Refraction", 0f);
+                var strength = material.GetFloat("_HighlightStrength");
+                var shadow = material.GetColor("_ShadowColor");
+                var radius = material.GetFloat("_Radius") * extent;
+                var shadowExtent = Mathf.CeilToInt((material.GetFloat("_ShadowSoftness") + ((Vector2)material.GetVector("_ShadowOffset")).magnitude) * extent) + 2;
+                var mesh = BuildMesh(image);
+                foreach (var background in new[] { Color.white, new Color(0.12f, 0.12f, 0.12f, 1f) })
+                {
+                    capture.SetPixel(0, 0, background);
+                    capture.Apply(false, false);
+                    SetCapture(capture);
+                    Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                    material.SetFloat("_HighlightStrength", 0f);
+                    material.SetColor("_ShadowColor", shadow);
+                    var shadowed = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    material.SetColor("_ShadowColor", Color.clear);
+                    var unshadowed = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    material.SetColor("_ShadowColor", shadow);
+                    material.SetFloat("_HighlightStrength", strength);
+                    var lit = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    AssertAlphaEqual(shadowed, lit, "Soft frame lighting cannot alter the cover or shadow coverage.");
+                    Assert.That(lit[size / 2 * size + size / 2].a, Is.Zero, "The frame must leave the later full-resolution cover interior clear.");
+                    WriteWhiteEdgePreview($"CoverOuterProfile-{Mathf.RoundToInt(extent)}-{(background.r > 0.5f ? "White" : "Dark")}", shadowed, lit, size);
+                    var contactSum = 0f;
+                    var peakSum = 0f;
+                    var maximumPeak = 0f;
+                    var maximumStep = 0f;
+                    var totalSpan = 0f;
+                    var softArcs = 0;
+                    for (var angle = 0; angle < 32; angle++)
+                    {
+                        var radians = angle * Mathf.PI * 2f / 32f;
+                        var normal = new Vector2(Mathf.Cos(radians), Mathf.Sin(radians));
+                        var profile = new float[shadowExtent * 4 + 1];
+                        var peak = 0f;
+                        for (var step = 0; step < profile.Length; step++)
+                        {
+                            var point = Vector2.one * (size * 0.5f) + normal * (radius + step * 0.25f);
+                            var withShadow = CompositeAt(shadowed, point, background);
+                            var withoutShadow = CompositeAt(unshadowed, point, background);
+                            profile[step] = Mathf.Max(0f, (withoutShadow.grayscale - withShadow.grayscale) / background.grayscale);
+                            peak = Mathf.Max(peak, profile[step]);
+                            if (step > 0)
+                            {
+                                maximumStep = Mathf.Max(maximumStep, Mathf.Abs(profile[step] - profile[step - 1]));
+                            }
+                        }
+                        contactSum += profile[0];
+                        peakSum += peak;
+                        maximumPeak = Mathf.Max(maximumPeak, peak);
+                        if (peak > 0.005f)
+                        {
+                            var first = -1;
+                            var last = -1;
+                            for (var step = 0; step < profile.Length; step++)
+                            {
+                                if (profile[step] >= peak * 0.25f)
+                                {
+                                    if (first < 0)
+                                    {
+                                        first = step;
+                                    }
+                                    last = step;
+                                }
+                            }
+                            totalSpan += (last - first) * 0.25f;
+                            softArcs++;
+                        }
+                    }
+                    TestContext.WriteLine($"COVER_OUTER_PROFILE extent={extent:F0} capture={background.r:F2} contact={contactSum / 32f:F6} peak={peakSum / 32f:F6} ratio={contactSum / peakSum:F6} maximumStep={maximumStep:F6} softArcs={softArcs} meanSpan={totalSpan / Mathf.Max(softArcs, 1):F3}");
+                    Assert.That(peakSum / 32f, Is.GreaterThan(0.015f), "The frame must retain a visible exterior soft shadow.");
+                    Assert.That(contactSum, Is.LessThan(peakSum * 0.25f), "The actual silhouette cannot abruptly switch on a dark shadow rail.");
+                    Assert.That(maximumPeak, Is.LessThanOrEqualTo(shadow.a + 0.002f), "The soft shadow cannot accumulate extra opacity at the contour.");
+                    Assert.That(maximumStep, Is.LessThan(0.05f), "The native-size outer profile must change smoothly across subpixel positions.");
+                    Assert.That(softArcs, Is.GreaterThanOrEqualTo(16));
+                    Assert.That(totalSpan / softArcs, Is.GreaterThan(1f), "The exterior shadow must occupy a soft band rather than a narrow dark line.");
+                }
             }
         }
 
@@ -817,6 +1033,8 @@ namespace MajdataPlay.Tests.Game.Rendering
                         var owned = image.material;
                         var rendered = image.canvasRenderer.GetMaterial(0);
                         Assert.That(rendered, Is.Not.SameAs(owned));
+                        Assert.That(owned.GetFloat("_BackdropIsPanel"), Is.Zero, "Native category capsules must retain their small-control lighting.");
+                        Assert.That(rendered.GetFloat("_BackdropIsPanel"), Is.Zero, "The stencil variant must retain the same small-control policy.");
                         Assert.That(image.SourceMaterial, Is.SameAs(sourceMaterial));
                         Assert.That(image.color, Is.EqualTo(originalColor));
                         Assert.That(panel.RefractionReady, Is.True);
@@ -905,6 +1123,235 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
         }
 
+        /// <summary>Checks real category faces retain soft gradients and white reflections across selection and background changes.</summary>
+        /// <returns>The Setting/List face, split-background, reflection and coverage regression.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator NativeCategories_FaceGradientsAndReflectionsSurviveSelectionAndCaptures()
+        {
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            const int size = 512;
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            Assert.That(target.Create() && resolved.Create(), Is.True);
+            var capture = _objects.Track(new Texture2D(64, 1, TextureFormat.RGBA32, false, true)
+            {
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            });
+            var sourcePixels = new Color[capture.width];
+            var captures = new[] { Color.white, new Color(0.03f, 0.03f, 0.03f, 1f),
+                new Color(0.02f, 0.05f, 1f, 1f), new Color(1f, 0.9f, 0.05f, 1f), Color.green, Color.red };
+            foreach (var setting in new[] { true, false })
+            {
+                var panel = CreateAuthoredCategory(canvas, setting, selected: false);
+                var image = panel.GetComponent<QualityUiImage>();
+                var selected = CreateAuthoredCategory(canvas, setting, selected: true).GetComponent<QualityUiImage>();
+                var unselectedColor = image.color;
+                var unselectedSize = image.rectTransform.rect.size;
+                var selectedColor = selected.color;
+                var selectedSize = selected.rectTransform.rect.size;
+                selected.gameObject.SetActive(false);
+                foreach (var amount in new[] { 0f, 0.5f, 1f })
+                {
+                    image.color = Color.Lerp(unselectedColor, selectedColor, amount);
+                    image.rectTransform.sizeDelta = Vector2.Lerp(unselectedSize, selectedSize, amount);
+                    yield return null;
+                    Canvas.ForceUpdateCanvases();
+                    Assert.That(panel.RefractionReady, Is.True);
+                    var material = _objects.Track(new Material(image.materialForRendering));
+                    material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                    material.SetFloat("_GlassRefraction", 0f);
+                    var strength = material.GetFloat("_GlassHighlight");
+                    var mesh = BuildMesh(image);
+                    var halfHeight = image.rectTransform.rect.height * size / 512f;
+                    var flatReferences = new List<Color[]>(2);
+                    var litReferences = new List<Color[]>(2);
+                    var whiteBackgroundReflection = new float[2, 2];
+                    for (var captureIndex = 0; captureIndex <= captures.Length; captureIndex++)
+                    {
+                        var split = captureIndex == captures.Length;
+                        for (var x = 0; x < sourcePixels.Length; x++)
+                        {
+                            sourcePixels[x] = split ? captures[x < capture.width / 2 ? 0 : 1] : captures[captureIndex];
+                        }
+                        capture.SetPixels(sourcePixels);
+                        capture.Apply(false, false);
+                        SetCapture(capture);
+                        Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                        material.SetFloat("_GlassHighlight", 0f);
+                        var flat = Draw(image, material, mesh, target, resolved, reader, 1, axisAligned: true);
+                        material.SetFloat("_GlassHighlight", strength);
+                        var lit = Draw(image, material, mesh, target, resolved, reader, 1, axisAligned: true);
+                        AssertAlphaEqual(flat, lit, "Face lighting must preserve opacity and the animated silhouette.");
+                        Assert.That(MaximumPixelDifference(flat, lit, 3), Is.GreaterThan(0.003f), "Every capture must retain finite, visible glass lighting.");
+                        if (captureIndex < 2)
+                        {
+                            flatReferences.Add(flat);
+                            litReferences.Add(lit);
+                        }
+                        var center = Vector2.one * (size * 0.5f);
+                        if (split)
+                        {
+                            var left = AverageInteriorRgb(flat, size, center + Vector2.left * 24f, 2, 1);
+                            var right = AverageInteriorRgb(flat, size, center + Vector2.right * 24f, 2, 1);
+                            Assert.That(Mathf.Abs(left.r - right.r), Is.GreaterThan(0.1f), "The same category must visibly span both bright and dark background halves.");
+                        }
+                        foreach (var half in new[] { 0, 1 })
+                        {
+                            var x = size * 0.5f + (half == 0 ? -16f : 16f);
+                            var face = new Color[3];
+                            var flatFace = new Color[3];
+                            for (var band = 0; band < face.Length; band++)
+                            {
+                                var point = new Vector2(x, size * 0.5f + (band - 1) * halfHeight * 0.65f);
+                                face[band] = AverageInteriorRgb(lit, size, point, 4, 1);
+                                flatFace[band] = AverageInteriorRgb(flat, size, point, 4, 1);
+                                if (split)
+                                {
+                                    var expectedFlat = AverageInteriorRgb(flatReferences[half], size, point, 4, 1);
+                                    var expectedLit = AverageInteriorRgb(litReferences[half], size, point, 4, 1);
+                                    Assert.That(Vector4.Distance(face[band], expectedLit), Is.LessThan(0.002f), "A background boundary must not change the authored face gradient.");
+                                    Assert.That(Vector4.Distance(flatFace[band], expectedFlat), Is.LessThan(0.002f));
+                                }
+                            }
+                            if (captureIndex == 0)
+                            {
+                                Assert.That(face[2].grayscale, Is.GreaterThan(face[1].grayscale + 0.003f), "The category needs a soft upper face highlight.");
+                                var centerAbsorption = (flatFace[1].grayscale - face[1].grayscale) / flatFace[1].grayscale;
+                                Assert.That(centerAbsorption, Is.InRange(0.03f, 0.08f), "The middle face needs restrained relative absorption throughout its tint transition.");
+                                if (amount == 1f)
+                                {
+                                    Assert.That(face[1].grayscale, Is.GreaterThan(face[0].grayscale + 0.001f), "The dark selected face should shade downward, independently of its lower white contour.");
+                                }
+                            }
+                            foreach (var side in new[] { 0, 1 })
+                            {
+                                var sign = side == 0 ? -1f : 1f;
+                                var point = new Vector2(x, size * 0.5f + sign * (halfHeight - 2f));
+                                var edge = AverageInteriorRgb(lit, size, point, 4, 0);
+                                var flatEdge = AverageInteriorRgb(flat, size, point, 4, 0);
+                                var reflection = edge.grayscale - flatEdge.grayscale;
+                                if (captureIndex == 0)
+                                {
+                                    whiteBackgroundReflection[half, side] = reflection;
+                                    var faceReflection = face[side == 0 ? 0 : 2].grayscale - flatFace[side == 0 ? 0 : 2].grayscale;
+                                    Assert.That(reflection, Is.GreaterThan(faceReflection + 0.003f), "Both contours need a white reflection distinct from the face gradient.");
+                                }
+                                else if (captureIndex == 1)
+                                {
+                                    Assert.That(reflection, Is.GreaterThan(whiteBackgroundReflection[half, side] + 0.005f), "White reflections must become more visible naturally over a dark captured background.");
+                                }
+                                if (split)
+                                {
+                                    var expected = AverageInteriorRgb(litReferences[half], size, point, 4, 0);
+                                    Assert.That(Vector4.Distance(edge, expected), Is.LessThan(0.002f), "The same contour must retain its lighting on both sides of a background boundary.");
+                                }
+                            }
+                            TestContext.WriteLine($"CATEGORY_FACE setting={setting} selected={amount:F1} capture={captureIndex} half={half} bottom={face[0].grayscale:F5} middle={face[1].grayscale:F5} top={face[2].grayscale:F5}");
+                        }
+                        if (captureIndex < 2 || split)
+                        {
+                            WriteWhiteEdgePreview($"CategoryFace-{(setting ? "Setting" : "List")}-{Mathf.RoundToInt(amount * 100)}-{captureIndex}", flat, lit, size);
+                        }
+                    }
+                }
+                panel.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>Checks a real white capsule has a continuous softly shaded face with upper and lower white reflections.</summary>
+        /// <returns>The production face-gradient, neutral-color, size, pixel-density, multisampling and coverage regression.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator NativeWhiteGlass_FaceGradientAndReflectionsPreserveCoverage()
+        {
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            var panel = CreateAuthoredCategory(canvas, setting: true, selected: false);
+            var image = panel.GetComponent<QualityUiImage>();
+            image.color = Color.white;
+            const int size = 512;
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            Assert.That(resolved.Create(), Is.True);
+            foreach (var extent in new[] { image.rectTransform.rect.size, new Vector2(180f, 52f) })
+            {
+                image.rectTransform.sizeDelta = extent;
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                Assert.That(panel.RefractionReady, Is.True);
+                var material = _objects.Track(new Material(image.materialForRendering));
+                material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                material.SetFloat("_GlassRefraction", 0f);
+                var mesh = BuildMesh(image);
+                var strength = material.GetFloat("_GlassHighlight");
+                foreach (var samples in new[] { 1, 4 })
+                {
+                    var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear)
+                    {
+                        antiAliasing = samples
+                    });
+                    Assert.That(SystemInfo.GetRenderTextureSupportedMSAASampleCount(target.descriptor), Is.EqualTo(samples));
+                    Assert.That(target.Create(), Is.True);
+                    foreach (var pixelsPerUnit in new[] { 1, 2 })
+                    {
+                        SetCapture(Texture2D.whiteTexture);
+                        Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                        material.SetFloat("_GlassHighlight", 0f);
+                        var flat = Draw(image, material, mesh, target, resolved, reader, samples, largeBoard: pixelsPerUnit == 1, axisAligned: true);
+                        material.SetFloat("_GlassHighlight", strength);
+                        var lit = Draw(image, material, mesh, target, resolved, reader, samples, largeBoard: pixelsPerUnit == 1, axisAligned: true);
+                        AssertAlphaEqual(flat, lit, "Face lighting must preserve the native capsule silhouette and opacity.");
+                        var center = Vector2.one * (size * 0.5f);
+                        var flatCenter = AverageInteriorRgb(flat, size, center, 8, 1);
+                        // Native UGUI's fast Gamma-to-Linear approximation maps white slightly below one.
+                        Assert.That(flatCenter.r, Is.EqualTo(1f).Within(0.005f), "The disabled-lighting reference must remain white.");
+                        var halfHeight = image.rectTransform.rect.height * pixelsPerUnit * 0.5f;
+                        var face = new Color[3];
+                        for (var band = 0; band < face.Length; band++)
+                        {
+                            var point = center + Vector2.up * ((band - 1) * halfHeight * 0.65f);
+                            face[band] = AverageInteriorRgb(lit, size, point, 8, 1);
+                            Assert.That(face[band].r, Is.EqualTo(face[band].g).Within(0.001f));
+                            Assert.That(face[band].r, Is.EqualTo(face[band].b).Within(0.001f));
+                        }
+                        var centerDrop = flatCenter.r - face[1].r;
+                        Assert.That(centerDrop, Is.InRange(0.025f, 0.06f), "A pure white face needs a restrained middle shade rather than a flat clear center.");
+                        Assert.That(face[2].r, Is.GreaterThan(face[1].r + 0.004f), "The upper white face must brighten softly toward the contour.");
+                        Assert.That(face[0].r, Is.GreaterThan(face[1].r + 0.004f), "The lower white face must also retain a soft reflection.");
+                        // Inspect the full face rather than accepting a single bright edge pixel as a gradient.
+                        var firstY = Mathf.CeilToInt(center.y - halfHeight * 0.72f);
+                        var lastY = Mathf.FloorToInt(center.y + halfHeight * 0.72f);
+                        var previous = AverageInteriorRgb(lit, size, new Vector2(center.x, firstY), 8, 0).r;
+                        var maximumStep = 0f;
+                        for (var y = firstY + 1; y <= lastY; y++)
+                        {
+                            var current = AverageInteriorRgb(lit, size, new Vector2(center.x, y), 8, 0).r;
+                            maximumStep = Mathf.Max(maximumStep, Mathf.Abs(current - previous));
+                            previous = current;
+                        }
+                        Assert.That(maximumStep, Is.LessThan(0.006f), "The face must transition continuously without a hard internal boundary.");
+                        foreach (var side in new[] { -1f, 1f })
+                        {
+                            var point = center + Vector2.up * (side * (halfHeight - 2f));
+                            var edge = AverageInteriorRgb(lit, size, point, 8, 0);
+                            Assert.That(edge.r, Is.GreaterThan(face[1].r + 0.01f), "Both contours must retain a white reflection above the middle shade.");
+                            Assert.That(edge.r, Is.LessThanOrEqualTo(flatCenter.r + 0.002f), "White reflections must remain within the existing color headroom.");
+                        }
+                        TestContext.WriteLine($"WHITE_CAPSULE_FACE extent={extent} samples={samples} pixelsPerUnit={pixelsPerUnit} bottom={face[0].r:F5} middle={face[1].r:F5} top={face[2].r:F5} shade={centerDrop:F5} maximumStep={maximumStep:F5}");
+                        WriteWhiteEdgePreview($"NativeWhiteFace-{Mathf.RoundToInt(extent.x)}x{Mathf.RoundToInt(extent.y)}-{samples}x-{pixelsPerUnit}px", flat, lit, size);
+                    }
+                }
+            }
+        }
+
         /// <summary>Checks the actual adjustment controls use category-sized lenses without changing their capture role or Gaussian output.</summary>
         /// <returns>The authored plus/minus material and GPU comparison.</returns>
         [UnityTest]
@@ -938,6 +1385,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Assert.That(panel.SourceRole, Is.EqualTo(UiBackdropSourceRole.Peripheral));
                 Assert.That(panel.RefractionReady, Is.True);
                 var material = _objects.Track(new Material(image.materialForRendering));
+                Assert.That(material.GetFloat("_BackdropIsPanel"), Is.Zero, "Adjustment controls cannot inherit the large-plate recipe.");
                 material.SetInt("_StencilComp", (int)CompareFunction.Always);
                 var optics = material.GetVector("_LiquidGlassOptics");
                 Assert.That(optics.x, Is.InRange(categoryWidth * 0.95f, categoryWidth * 1.05f),
@@ -1255,6 +1703,79 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
         }
 
+        /// <summary>Checks the physical outer key softens a thin board shadow already present in RT3.</summary>
+        /// <returns>The half-resolution, real-outline transmission regression.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator PeripheralLens_SoftensTransmittedBoardEdgeWithoutChangingCoverage()
+        {
+            const int size = 512;
+            const int captureSize = size / 2;
+            const string captureInvSize = "_MajUiButtonCaptureInvSize";
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            var panel = CreateSerializedSurface(canvas, "Assets/Prefabs/UI/Buttons.prefab", 5208406972733417819L);
+            var image = panel.GetComponent<QualityUiImage>();
+            yield return null;
+            Canvas.ForceUpdateCanvases();
+            Assert.That(panel.RefractionReady && panel.IsButton, Is.True);
+            var material = _objects.Track(new Material(image.materialForRendering));
+            material.SetInt("_StencilComp", (int)CompareFunction.Always);
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            Assert.That(target.Create() && resolved.Create(), Is.True);
+            var capture = _objects.Track(new Texture2D(captureSize, captureSize, TextureFormat.RGBA32, false, true)
+            {
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            });
+            var pixels = new Color[captureSize * captureSize];
+            var flatFill = new Color(0.86f, 0.84f, 0.80f, 1f);
+            var shadow = new Color(0.36f, 0.34f, 0.30f, 1f);
+            for (var y = 0; y < captureSize; y++)
+            {
+                for (var x = 0; x < captureSize; x++)
+                {
+                    // The white plate's thin shadow runs continuously through the key body.
+                    var curve = captureSize / 2 + (y - captureSize / 2) * (y - captureSize / 2) / 170;
+                    pixels[y * captureSize + x] = x == curve ? shadow : flatFill;
+                }
+            }
+            capture.SetPixels(pixels);
+            capture.Apply(false, false);
+            SetCapture(capture);
+            Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+            var mesh = BuildMesh(image);
+            Shader.SetGlobalVector(captureInvSize, Vector4.zero);
+            var sharp = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true);
+            Shader.SetGlobalVector(captureInvSize, new Vector4(1f / captureSize, 1f / captureSize, 0f, 0f));
+            var filtered = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true);
+            AssertAlphaEqual(sharp, filtered, "Softening the captured board edge cannot modify the button's artwork coverage.");
+            var row = size / 2 * size;
+            var peakRecovery = 0f;
+            for (var x = size / 2 - 8; x < size / 2 + 12; x++)
+            {
+                peakRecovery = Mathf.Max(peakRecovery, filtered[row + x].grayscale - sharp[row + x].grayscale);
+            }
+            Assert.That(peakRecovery, Is.GreaterThan(0.06f), "RT3's narrow shadow should visibly lose contrast in the key.");
+            Assert.That(filtered[row + size / 2 - 20], Is.EqualTo(sharp[row + size / 2 - 20]),
+                "A uniform surrounding transmission must retain its authored color.");
+            var lineCenter = row + size / 2 + 1;
+            Assert.That(filtered[lineCenter].grayscale,
+                Is.LessThanOrEqualTo(Mathf.Min(filtered[lineCenter - 2].grayscale, filtered[lineCenter + 2].grayscale) + 0.001f),
+                "Overlapping bilinear footprints must not split the shadow into two darker rails.");
+            material.DisableKeyword(UiBackdropPanel.LiquidStyleKeyword);
+            var gaussian = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true);
+            Shader.SetGlobalVector(captureInvSize, Vector4.zero);
+            var gaussianWithoutFilter = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true);
+            Assert.That(MaximumPixelDifference(gaussian, gaussianWithoutFilter, 4), Is.Zero,
+                "Gaussian keys must not apply the extra liquid transmission filter.");
+            WriteWhiteEdgePreview("PeripheralBoardShadow", sharp, filtered, size);
+        }
+
         /// <summary>Checks a real peripheral body refracts beyond its reflection band while retaining center, color and fallback behavior.</summary>
         /// <returns>The actual authored peripheral profile and unchanged-lighting GPU regression.</returns>
         [UnityTest]
@@ -1406,6 +1927,428 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(fallbackDifference, Is.Zero, "The tail cannot bypass missing-data refraction readiness.");
             TestContext.WriteLine($"PERIPHERAL_TAIL_GPU sprite={image.sprite.name} width={optics.x:F6} radius={radius:F6} middlePixels={middlePixels} middleMax={middleDifference:F8} legacyFlat={oldFlatDifference:F8} centerMax={centerDifference:F8} centerPixel={centerIndex % size},{centerIndex / size} rect={material.GetVector("_LiquidGlassRect")} sourceRect={material.GetVector("_LiquidGlassSpriteRect")} shape={material.GetVector("_LiquidGlassShape")} alphaMax={alphaDifference:F8} flatSource={flatDifference:F8} fallback={fallbackDifference:F8}");
             Assert.That(centerDifference, Is.LessThan(0.001f), "The tail must settle smoothly to an unchanged center.");
+        }
+
+        /// <summary>Checks plates keep fifteen percent authored color and transmit eighty-five percent capture through a sixty-five percent tint.</summary>
+        /// <returns>The authored base, reduced transmission tint, flat-center lighting and Gaussian-isolation regression.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator LiquidPanels_FixedTransmissionAndEdgeOnlyLightingUseAuthoredBase()
+        {
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            const int size = 1200;
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            var capture = _objects.Track(new Texture2D(1, 1, TextureFormat.RGBAFloat, false, true));
+            Assert.That(target.Create() && resolved.Create(), Is.True);
+            foreach (var source in new[]
+            {
+                (Name: "List", Path: "Assets/Prefabs/List/Main_Display_ribbon.prefab", Panel: 5019321880153334813L),
+                (Name: "Login", Path: "Assets/Scenes/Login.unity", Panel: 900000000000000021L),
+                (Name: "InheritedSetting", Path: "Assets/Scenes/Setting.unity", Panel: 900000000000000016L),
+                (Name: "UserInfo", Path: "Assets/Prefabs/UI/UserInfo.prefab", Panel: 4988950831640157352L),
+                (Name: "PracticeChart", Path: "Assets/Scenes/Practice.unity", Panel: 900000000000000022L)
+            })
+            {
+                var panel = CreateSerializedSurface(canvas, source.Path, source.Panel);
+                var image = panel.GetComponent<QualityUiImage>();
+                if (source.Name == "List")
+                {
+                    image.color = new Color(0.8f, 0.9f, 1f, image.color.a);
+                }
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                Assert.That(panel.RefractionReady, Is.True);
+                var material = _objects.Track(new Material(image.materialForRendering));
+                Assert.That(material.GetFloat("_BackdropIsPanel"), Is.EqualTo(1f), source.Name + " must use plate treatment.");
+                material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                material.SetFloat("_GlassRefraction", 0f);
+                var strength = material.GetFloat("_GlassHighlight");
+                material.SetFloat("_GlassHighlight", 0f);
+                material.SetVector("_Color", new Vector4(0.9f, 0.85f, 0.8f, 1f));
+                var mesh = BuildMesh(image);
+                var graphic = (Color)mesh.colors32[0];
+                if (QualitySettings.activeColorSpace == ColorSpace.Linear)
+                {
+                    graphic = graphic.linear;
+                }
+                var uv = (Vector2)material.GetVector("_FillSampleUV");
+                uv = Vector2.Scale(uv, material.GetTextureScale("_MainTex")) + material.GetTextureOffset("_MainTex");
+                var fill = SampleWorkingTexture(image.mainTexture, uv);
+                var sourceColor = material.GetVector("_LiquidTintSourceColor");
+                var inherited = Color.white;
+                if (sourceColor.w > 0f)
+                {
+                    var sourceFill = SampleWorkingTexture(material.GetTexture("_LiquidTintSourceTex"), (Vector2)material.GetVector("_LiquidTintSourceUV"));
+                    inherited = Color.Lerp(Color.white, sourceFill * (Color)sourceColor, sourceColor.w);
+                }
+                var materialColor = (Color)material.GetVector("_Color");
+                if (QualitySettings.activeColorSpace == ColorSpace.Linear)
+                {
+                    // ShaderLab Color properties are converted on upload; the inherited tint is
+                    // already a working-space Vector and must not receive this conversion again.
+                    materialColor = materialColor.linear;
+                }
+                var baseColor = fill * graphic * materialColor * inherited;
+                var transmissionFilter = Color.Lerp(Color.white, baseColor, 0.65f);
+                var rect = material.GetVector("_LiquidGlassRect");
+                var center = Vector2.one * (size * 0.5f) + (Vector2)rect;
+                foreach (var color in new[] { new Color(0.2f, 0.4f, 0.8f, 1f), new Color(0.8f, 0.3f, 0.1f, 1f) })
+                {
+                    capture.SetPixel(0, 0, color);
+                    capture.Apply(false, false);
+                    SetCapture(capture);
+                    Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                    var pixels = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    var actual = AverageInteriorRgb(pixels, size, center, 1, 1);
+                    for (var channel = 0; channel < 3; channel++)
+                    {
+                        var expected = baseColor[channel] * 0.15f + color[channel] * transmissionFilter[channel] * 0.85f;
+                        Assert.That(actual[channel], Is.EqualTo(expected).Within(0.005f),
+                            source.Name + " must retain full authored color in the solid share and apply only sixty-five percent tint to the captured share.");
+                    }
+                    material.SetFloat("_LiquidArtworkBlend", 1f);
+                    material.SetFloat("_LiquidTintStrength", 0f);
+                    material.SetFloat("_TintStrength", 0f);
+                    var legacyChanged = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    Assert.That(MaximumPixelDifference(pixels, legacyChanged, 4), Is.LessThan(0.0001f), "Legacy tint/share controls cannot alter the fixed liquid-plate mixture.");
+                }
+                capture.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1f));
+                capture.Apply(false, false);
+                var flat = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                material.SetFloat("_GlassHighlight", strength);
+                var lit = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                AssertAlphaEqual(flat, lit, "Plate lighting must preserve artwork coverage.");
+                var middle = AverageInteriorRgb(lit, size, center, 1, 1);
+                var flatMiddle = AverageInteriorRgb(flat, size, center, 1, 1);
+                foreach (var height in new[] { -0.65f, 0.65f })
+                {
+                    var body = AverageInteriorRgb(lit, size, center + Vector2.up * (rect.w * height), 1, 1);
+                    Assert.That(Vector4.Distance(body, middle), Is.LessThan(0.002f), "The central eighty percent must retain one flat plate treatment.");
+                }
+                foreach (var side in new[] { -1f, 1f })
+                {
+                    var peak = float.MinValue;
+                    for (var step = 86; step <= 97; step++)
+                    {
+                        var point = center + Vector2.up * (rect.w * side * step * 0.01f);
+                        var index = Mathf.RoundToInt(point.y) * size + Mathf.RoundToInt(point.x);
+                        if (flat[index].a < 0.99f)
+                        {
+                            continue;
+                        }
+                        var baseline = flat[index] / flat[index].a;
+                        if (Vector4.Distance(baseline, flatMiddle) > 0.001f)
+                        {
+                            continue;
+                        }
+                        peak = Mathf.Max(peak, ((lit[index] - flat[index]) / flat[index].a).grayscale);
+                    }
+                    Assert.That(peak, Is.GreaterThan(middle.grayscale - flatMiddle.grayscale + 0.004f), "Each outer height band must carry a visible reflection above the flat middle.");
+                }
+                WriteWhiteEdgePreview("FixedPlate-" + source.Name, flat, lit, size);
+                material.DisableKeyword(UiBackdropPanel.LiquidStyleKeyword);
+                var gaussian = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                material.SetFloat("_BackdropIsPanel", 0f);
+                var gaussianWithoutPlate = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                Assert.That(MaximumPixelDifference(gaussian, gaussianWithoutPlate, 4), Is.Zero, "Gaussian rendering must ignore the liquid-only plate policy.");
+                panel.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>Checks all eight peripheral surfaces keep their radial color transition near the rim over bright and dark captures.</summary>
+        /// <returns>The actual eight-key center, interior gradient, isotropic rim and unchanged-coverage regression.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator PeripheralButtons_RadialLightingIsDirectionIndependent()
+        {
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            const int size = 512;
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            var capture = _objects.Track(new Texture2D(1, 1, TextureFormat.RGBAFloat, false, true));
+            Assert.That(target.Create() && resolved.Create(), Is.True);
+            foreach (var id in new[] { 1589196009147436767L, 3061586214258133881L, 8655079017024877620L, 8983832068243600665L,
+                7024678684790401055L, 5208406972733417819L, 4854234884495665087L, 6210024136466343178L })
+            {
+                var panel = CreateSerializedSurface(canvas, "Assets/Prefabs/UI/Buttons.prefab", id);
+                var image = panel.GetComponent<QualityUiImage>();
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                Assert.That(panel.RefractionReady, Is.True);
+                var material = _objects.Track(new Material(image.materialForRendering));
+                Assert.That(material.GetFloat("_BackdropIsButton"), Is.EqualTo(1f));
+                Assert.That(material.GetFloat("_BackdropIsNativeControl"), Is.Zero);
+                Assert.That(material.GetFloat("_BackdropIsPanel"), Is.Zero);
+                material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                material.SetFloat("_GlassRefraction", 0f);
+                var strength = material.GetFloat("_GlassHighlight");
+                var mesh = BuildMesh(image);
+                var rect = material.GetVector("_LiquidGlassRect");
+                var center = Vector2.one * (size * 0.5f) + (Vector2)rect;
+                foreach (var background in new[] { Color.white, new Color(0.05f, 0.05f, 0.05f, 1f) })
+                {
+                    capture.SetPixel(0, 0, background);
+                    capture.Apply(false, false);
+                    SetCapture(capture);
+                    Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                    material.SetFloat("_GlassHighlight", 0f);
+                    var flat = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    material.SetFloat("_GlassHighlight", strength);
+                    var lit = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    AssertAlphaEqual(flat, lit, "Radial lighting cannot change the actual key coverage.");
+                    var baseline = SampleInteriorRgb(flat, size, center);
+                    var shaded = SampleInteriorRgb(lit, size, center);
+                    var absorption = (baseline.grayscale - shaded.grayscale) / baseline.grayscale;
+                    Assert.That(absorption, Is.InRange(0.15f, 0.22f), $"Key {id}: the visible face needs the strengthened radial center depth.");
+                    var weakest = float.MaxValue;
+                    var strongest = float.MinValue;
+                    var weakestEdge = float.MaxValue;
+                    var minimumInnerGain = float.MaxValue;
+                    var minimumMiddleGain = float.MaxValue;
+                    for (var angle = 0; angle < 16; angle++)
+                    {
+                        var radians = angle * Mathf.PI * 2f / 16f;
+                        var ray = new Vector2(Mathf.Cos(radians) * rect.z, Mathf.Sin(radians) * rect.w);
+                        var peak = float.MinValue;
+                        // Visibility may use the clean outer band; directionality below always compares one depth.
+                        for (var step = 87; step <= 98; step++)
+                        {
+                            var point = center + ray * (step * 0.01f);
+                            var index = Mathf.RoundToInt(point.y) * size + Mathf.RoundToInt(point.x);
+                            if (flat[index].a < 0.99f || Vector4.Distance(flat[index] / flat[index].a, baseline) > 0.001f)
+                            {
+                                continue;
+                            }
+                            peak = Mathf.Max(peak, ((lit[index] - flat[index]) / flat[index].a).grayscale / (1f - baseline.grayscale));
+                        }
+                        Assert.That(peak, Is.GreaterThan(0.08f), $"Key {id}, direction {angle}: both light and dark surfaces need a visible soft white rim.");
+                        weakestEdge = Mathf.Min(weakestEdge, peak);
+                        var innerFace = SampleInteriorRgb(lit, size, center + ray * 0.5f);
+                        Assert.That(Vector4.Distance(innerFace, shaded), Is.LessThan(0.001f),
+                            $"Key {id}, direction {angle}: the color transition must end before the inner half of the face.");
+                        var inner = SampleInteriorRgb(lit, size, center + ray * 0.68f);
+                        var middle = SampleInteriorRgb(lit, size, center + ray * 0.8f);
+                        var innerGain = (inner.grayscale - shaded.grayscale) / baseline.grayscale;
+                        var middleGain = (middle.grayscale - shaded.grayscale) / baseline.grayscale;
+                        minimumInnerGain = Mathf.Min(minimumInnerGain, innerGain);
+                        minimumMiddleGain = Mathf.Min(minimumMiddleGain, middleGain);
+                        Assert.That(innerGain, Is.GreaterThan(0.01f), $"Key {id}, direction {angle}: the narrower color band must still brighten inward from the rim.");
+                        Assert.That(middleGain, Is.GreaterThan(innerGain + 0.025f), $"Key {id}, direction {angle}: the radial face must brighten gradually toward the rim.");
+                        var facePoint = center + ray * 0.8f;
+                        var flatFace = SampleInteriorRgb(flat, size, facePoint);
+                        Assert.That(Vector4.Distance(flatFace, baseline), Is.LessThan(0.001f), $"Key {id}, direction {angle}: the fixed-depth probe must exclude original ink.");
+                        var response = (middle.grayscale - flatFace.grayscale) / (1f - baseline.grayscale);
+                        weakest = Mathf.Min(weakest, response);
+                        strongest = Mathf.Max(strongest, response);
+                    }
+                    TestContext.WriteLine($"PERIPHERAL_RADIAL id={id} capture={background.r:F2} absorption={absorption:F5} innerGain={minimumInnerGain:F5} middleGain={minimumMiddleGain:F5} weakest={weakest:F5} strongest={strongest:F5} weakestEdge={weakestEdge:F5}");
+                    Assert.That(strongest - weakest, Is.LessThan(0.03f), $"Key {id}: reflections at the same depth cannot depend on vertical height or illumination direction.");
+                    WriteWhiteEdgePreview($"RadialKey-{id}-{(background.r > 0.5f ? "White" : "Dark")}", flat, lit, size);
+                }
+                panel.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>Checks complete authored surfaces do not expose distance-field or nine-slice seams through their face lighting.</summary>
+        /// <returns>The real board, sliced-card and peripheral GPU continuity regression with full-surface previews.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator AuthoredSurfaces_LightingIsContinuousAcrossMedialAndSliceBoundaries()
+        {
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            UiOutlineTheme.Configure(UiOutlineMode.All);
+            UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+            const int size = 1200;
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            var capture = _objects.Track(new Texture2D(1, 1, TextureFormat.RGBA32, false, true));
+            capture.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1f));
+            capture.Apply(false, false);
+            Assert.That(target.Create() && resolved.Create(), Is.True);
+            var failures = new List<string>();
+            foreach (var source in new[]
+            {
+                (Name: "ListBoard", Path: "Assets/Prefabs/List/Main_Display_ribbon.prefab", Panel: 5019321880153334813L),
+                (Name: "SettingBoard", Path: "Assets/Scenes/Setting.unity", Panel: 900000000000000017L),
+                (Name: "SettingValue", Path: "Assets/Scenes/Setting.unity", Panel: 900000000000000016L),
+                (Name: "LoginBoard", Path: "Assets/Scenes/Login.unity", Panel: 900000000000000021L),
+                (Name: "LoginGuest", Path: "Assets/Scenes/Login.unity", Panel: 900000000000000003L),
+                (Name: "LoginConfirm", Path: "Assets/Scenes/Login.unity", Panel: 900000000000000004L),
+                (Name: "UserInfoSliced", Path: "Assets/Prefabs/UI/UserInfo.prefab", Panel: 4988950831640157352L),
+                (Name: "PracticeChartSliced", Path: "Assets/Scenes/Practice.unity", Panel: 900000000000000022L),
+                (Name: "Peripheral", Path: "Assets/Prefabs/UI/Buttons.prefab", Panel: 1589196009147436767L)
+            })
+            {
+                var panel = CreateSerializedSurface(canvas, source.Path, source.Panel);
+                var image = panel.GetComponent<QualityUiImage>();
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                Assert.That(panel.RefractionReady, Is.True, source.Name + " must exercise supported enabled optics.");
+                var material = _objects.Track(new Material(image.materialForRendering));
+                if (source.Path == "Assets/Scenes/Login.unity")
+                {
+                    var optics = material.GetVector("_LiquidGlassOptics");
+                    Assert.That(optics.z, Is.Zero, "Login's plates and keys must not redraw a second, fine contour.");
+                    Assert.That(optics.w, Is.Zero);
+                    Assert.That(optics.x, Is.Positive, "Removing a fine glint must preserve the refraction width.");
+                }
+                material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                material.SetFloat("_GlassRefraction", 0f);
+                var strength = material.GetFloat("_GlassHighlight");
+                var mesh = BuildMesh(image);
+                SetCapture(capture);
+                Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                material.SetFloat("_GlassHighlight", 0f);
+                var flat = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                capture.SetPixel(0, 0, new Color(0.15f, 0.15f, 0.15f, 1f));
+                capture.Apply(false, false);
+                var alternateFlat = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                capture.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1f));
+                capture.Apply(false, false);
+                material.SetFloat("_GlassHighlight", strength);
+                var lit = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                AssertAlphaEqual(flat, alternateFlat, "Changing the test exposure cannot change surface coverage: " + source.Name);
+                AssertAlphaEqual(flat, lit, "Surface lighting cannot change the authored coverage: " + source.Name);
+                MaximumPixelDifference(flat, lit, 3);
+                WriteWhiteEdgePreview("Continuity-" + source.Name, flat, lit, size);
+                var center = size / 2 * size + size / 2;
+                Assert.That(flat[center].a, Is.GreaterThan(0.99f), source.Name + " must retain an ordinary interior reference.");
+                var reference = flat[center] / flat[center].a;
+                var alternateReference = alternateFlat[center] / alternateFlat[center].a;
+                var referenceTransmission = reference - alternateReference;
+                var transmissionMagnitude = Mathf.Max(Mathf.Abs(referenceTransmission.r), Mathf.Max(Mathf.Abs(referenceTransmission.g), Mathf.Abs(referenceTransmission.b)));
+                Assert.That(transmissionMagnitude, Is.GreaterThan(0.001f), source.Name + " must transmit a measurable exposure contrast.");
+                var body = new bool[flat.Length];
+                var interior = new bool[flat.Length];
+                var lighting = new Color[flat.Length];
+                for (var index = 0; index < flat.Length; index++)
+                {
+                    if (flat[index].a < 0.99f || alternateFlat[index].a < 0.99f)
+                    {
+                        continue;
+                    }
+                    var color = flat[index] / flat[index].a;
+                    var alternateColor = alternateFlat[index] / alternateFlat[index].a;
+                    var bodyDifference = color - reference;
+                    var alternateDifference = alternateColor - alternateReference;
+                    var transmissionDifference = color - alternateColor - referenceTransmission;
+                    var bodyError = Mathf.Max(Mathf.Abs(bodyDifference.r), Mathf.Max(Mathf.Abs(bodyDifference.g), Mathf.Abs(bodyDifference.b)));
+                    var alternateError = Mathf.Max(Mathf.Abs(alternateDifference.r), Mathf.Max(Mathf.Abs(alternateDifference.g), Mathf.Abs(alternateDifference.b)));
+                    var transmissionError = Mathf.Max(Mathf.Abs(transmissionDifference.r), Mathf.Max(Mathf.Abs(transmissionDifference.g), Mathf.Abs(transmissionDifference.b)));
+                    // Compare both flat colors and their transmitted response. Ink that happens to match one
+                    // exposure still loses contrast, and cannot masquerade as a continuous undecorated face.
+                    body[index] = Mathf.Max(bodyError, Mathf.Max(alternateError, transmissionError)) < transmissionMagnitude * 0.002f;
+                    lighting[index] = (lit[index] - flat[index]) / flat[index].a;
+                }
+                // Inset the uniform-artwork mask in both axes, excluding original ink, the silhouette and the narrow glint.
+                const int margin = 8;
+                for (var y = margin; y < size - margin; y++)
+                {
+                    for (var x = margin; x < size - margin; x++)
+                    {
+                        var valid = true;
+                        for (var dy = -margin; dy <= margin; dy += margin)
+                        {
+                            for (var dx = -margin; dx <= margin; dx += margin)
+                            {
+                                valid &= body[(y + dy) * size + x + dx];
+                            }
+                        }
+                        interior[y * size + x] = valid;
+                    }
+                }
+                var maximumJump = 0f;
+                var maximumSlopeChange = 0f;
+                var maximumPosition = Vector2Int.zero;
+                var comparisons = 0;
+                var neighborOffsets = new[] { 1, size };
+                for (var y = margin; y < size - margin - 1; y++)
+                {
+                    for (var x = margin; x < size - margin - 1; x++)
+                    {
+                        var index = y * size + x;
+                        foreach (var offset in neighborOffsets)
+                        {
+                            if (!interior[index] || !interior[index + offset])
+                            {
+                                continue;
+                            }
+                            var delta = lighting[index] - lighting[index + offset];
+                            var jump = Mathf.Max(Mathf.Abs(delta.r), Mathf.Max(Mathf.Abs(delta.g), Mathf.Abs(delta.b)));
+                            if (interior[index - offset])
+                            {
+                                var slopeChange = lighting[index - offset] - lighting[index] - delta;
+                                maximumSlopeChange = Mathf.Max(maximumSlopeChange,
+                                    Mathf.Max(Mathf.Abs(slopeChange.r), Mathf.Abs(slopeChange.g), Mathf.Abs(slopeChange.b)));
+                            }
+                            comparisons++;
+                            if (jump > maximumJump)
+                            {
+                                maximumJump = jump;
+                                maximumPosition = new Vector2Int(x, y);
+                            }
+                        }
+                    }
+                }
+                var sliceJump = 0f;
+                var sliceComparisons = 0;
+                if (image.type == Image.Type.Sliced)
+                {
+                    foreach (var axis in new[] { 0, 1 })
+                    {
+                        var seams = new HashSet<float>();
+                        foreach (var vertex in mesh.vertices)
+                        {
+                            seams.Add(vertex[axis]);
+                        }
+                        foreach (var seam in seams)
+                        {
+                            if (seam <= mesh.bounds.min[axis] + margin || seam >= mesh.bounds.max[axis] - margin)
+                            {
+                                continue;
+                            }
+                            var coordinate = Mathf.RoundToInt(size * 0.5f + seam);
+                            for (var along = margin; along < size - margin; along++)
+                            {
+                                var index = axis == 0 ? along * size + coordinate : coordinate * size + along;
+                                var previous = index - (axis == 0 ? 1 : size);
+                                if (!interior[index] || !interior[previous])
+                                {
+                                    continue;
+                                }
+                                var delta = lighting[index] - lighting[previous];
+                                sliceJump = Mathf.Max(sliceJump, Mathf.Max(Mathf.Abs(delta.r), Mathf.Max(Mathf.Abs(delta.g), Mathf.Abs(delta.b))));
+                                sliceComparisons++;
+                            }
+                        }
+                    }
+                    Assert.That(sliceComparisons, Is.GreaterThan(0), source.Name + " must sample actual internal slice interfaces.");
+                }
+                Assert.That(comparisons, Is.GreaterThan(250), source.Name + " must scan a two-dimensional body region.");
+                var detail = $"SURFACE_CONTINUITY name={source.Name} sprite={image.sprite.name} extent={image.rectTransform.rect.size} aspect={image.preserveAspect} type={image.type} ppu={image.pixelsPerUnitMultiplier:F3} highlight={strength:F5} keyword={material.IsKeywordEnabled(UiBackdropPanel.LiquidStyleKeyword)} native={material.GetFloat("_LiquidNativeContourReady")} profile={material.GetFloat("_LiquidProfileReady")} maxJump={maximumJump:F6} position={maximumPosition} comparisons={comparisons} sliceJump={sliceJump:F6} sliceComparisons={sliceComparisons}";
+                TestContext.WriteLine(detail);
+                // At half width the circular face may have a steeper slope. Check its local
+                // change in slope separately, so a discontinuity still fails the original limit.
+                var isPeripheral = material.GetFloat("_BackdropIsButton") > 0.5f
+                    && material.GetFloat("_BackdropIsNativeControl") < 0.5f;
+                if (maximumJump > (isPeripheral ? 0.025f : 0.01f) || maximumSlopeChange > 0.01f || sliceJump > 0.01f)
+                {
+                    failures.Add($"{detail} slopeChange={maximumSlopeChange:F6}");
+                }
+                panel.gameObject.SetActive(false);
+            }
+            Assert.That(failures, Is.Empty, string.Join("\n", failures));
         }
 
         /// <summary>Checks a missing optical resource does not move or erase a thin line on the real large board.</summary>
@@ -1904,6 +2847,140 @@ namespace MajdataPlay.Tests.Game.Rendering
             return reader.GetPixels();
         }
 
+        /// <summary>Reads one artwork sample through the current graphics color space without requiring readable source textures.</summary>
+        /// <param name="texture">The actual bound artwork or inherited-tint texture.</param>
+        /// <param name="uv">The same normalized coordinate consumed by the production shader.</param>
+        /// <returns>The GPU-sampled working-space color.</returns>
+        private Color SampleWorkingTexture(Texture texture, Vector2 uv)
+        {
+            var target = _objects.Track(new RenderTexture(1, 1, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            Assert.That(target.Create(), Is.True);
+            Graphics.Blit(texture, target, Vector2.zero, uv);
+            RenderTexture.active = target;
+            var reader = _objects.Track(new Texture2D(1, 1, TextureFormat.RGBAFloat, false, true));
+            reader.ReadPixels(new Rect(0, 0, 1, 1), 0, 0);
+            reader.Apply(false, false);
+            return reader.GetPixel(0, 0);
+        }
+
+        /// <summary>Loads an authored surface's static Image, geometry and optical fields without running its scene controllers.</summary>
+        /// <param name="canvas">The isolated test Canvas.</param>
+        /// <param name="path">The original scene or prefab asset.</param>
+        /// <param name="panelId">The serialized UiBackdropPanel component identifier.</param>
+        /// <returns>The active surface with its actual artwork, sizing policy and optional source tint.</returns>
+        private UiBackdropPanel CreateSerializedSurface(Canvas canvas, string path, long panelId)
+        {
+            var child = _objects.Create("Serialized surface " + panelId, canvas.transform);
+            child.SetActive(false);
+            var image = child.AddComponent<QualityUiImage>();
+            var panel = child.AddComponent<UiBackdropPanel>();
+#if UNITY_EDITOR
+            var yaml = MajdataPlay.IO.Storage.FileSystem.File.Open(path).ReadAllText();
+            var panelBody = Regex.Match(yaml, @"^--- !u!114 &" + panelId + @"\r?\n(?<body>.*?)(?=^--- |\z)", RegexOptions.Multiline | RegexOptions.Singleline).Groups["body"].Value;
+            Assert.That(panelBody, Is.Not.Empty, path + ": " + panelId);
+            ApplyAuthoredFields(panel, panelBody);
+            var owner = Regex.Match(panelBody, @"m_GameObject: \{fileID: (?<id>-?\d+)\}").Groups["id"].Value;
+            var imageBody = string.Empty;
+            var rectBody = string.Empty;
+            foreach (Match component in Regex.Matches(yaml, @"^--- !u!(?<type>\d+) &-?\d+\r?\n(?<body>.*?)(?=^--- |\z)", RegexOptions.Multiline | RegexOptions.Singleline))
+            {
+                var body = component.Groups["body"].Value;
+                if (!body.Contains("m_GameObject: {fileID: " + owner + "}"))
+                {
+                    continue;
+                }
+                if (component.Groups["type"].Value == "224")
+                {
+                    rectBody = body;
+                }
+                else if (body.Contains("guid: 7c51cc521e1747f0ba99ae9b65785bd5"))
+                {
+                    imageBody = body;
+                }
+            }
+            Assert.That(imageBody, Is.Not.Empty, path + ": surface Image");
+            Assert.That(rectBody, Is.Not.Empty, path + ": surface RectTransform");
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            var spriteReference = Regex.Match(imageBody, @"m_Sprite: \{fileID: (?<id>-?\d+), guid: (?<guid>[0-9a-f]{32})");
+            Assert.That(spriteReference.Success, Is.True);
+            var spriteId = long.Parse(spriteReference.Groups["id"].Value, culture);
+            var spritePath = AssetDatabase.GUIDToAssetPath(spriteReference.Groups["guid"].Value);
+            foreach (var asset in AssetDatabase.LoadAllAssetsAtPath(spritePath))
+            {
+                if (asset is Sprite sprite && AssetDatabase.TryGetGUIDAndLocalFileIdentifier(sprite, out _, out long id) && id == spriteId)
+                {
+                    image.sprite = sprite;
+                    break;
+                }
+            }
+            Assert.That(image.sprite, Is.Not.Null, path + ": exact authored Sprite");
+            var materialReference = Regex.Match(imageBody, @"m_Material: \{fileID: -?\d+, guid: (?<guid>[0-9a-f]{32})");
+            Assert.That(materialReference.Success, Is.True);
+            image.material = AssetDatabase.LoadAssetAtPath<Material>(AssetDatabase.GUIDToAssetPath(materialReference.Groups["guid"].Value));
+            var color = Regex.Match(imageBody, @"m_Color: \{r: (?<r>[^,]+), g: (?<g>[^,]+), b: (?<b>[^,]+), a: (?<a>[^}]+)\}");
+            Assert.That(color.Success, Is.True);
+            image.color = new Color(float.Parse(color.Groups["r"].Value, culture), float.Parse(color.Groups["g"].Value, culture),
+                float.Parse(color.Groups["b"].Value, culture), float.Parse(color.Groups["a"].Value, culture));
+            foreach (Match field in Regex.Matches(imageBody, @"^  (?<name>m_Type|m_PreserveAspect|m_UseSpriteMesh|m_FillCenter|m_PixelsPerUnitMultiplier): (?<v>[^\r\n]+)", RegexOptions.Multiline))
+            {
+                var value = float.Parse(field.Groups["v"].Value, culture);
+                switch (field.Groups["name"].Value)
+                {
+                    case "m_Type":
+                        image.type = (Image.Type)(int)value;
+                        break;
+                    case "m_PreserveAspect":
+                        image.preserveAspect = value != 0f;
+                        break;
+                    case "m_UseSpriteMesh":
+                        image.useSpriteMesh = value != 0f;
+                        break;
+                    case "m_FillCenter":
+                        image.fillCenter = value != 0f;
+                        break;
+                    case "m_PixelsPerUnitMultiplier":
+                        image.pixelsPerUnitMultiplier = value;
+                        break;
+                }
+            }
+            var extent = Regex.Match(rectBody, @"m_SizeDelta: \{x: (?<x>[^,]+), y: (?<y>[^}]+)\}");
+            var pivot = Regex.Match(rectBody, @"m_Pivot: \{x: (?<x>[^,]+), y: (?<y>[^}]+)\}");
+            Assert.That(extent.Success && pivot.Success, Is.True);
+            image.rectTransform.anchorMin = image.rectTransform.anchorMax = Vector2.one * 0.5f;
+            image.rectTransform.pivot = new Vector2(float.Parse(pivot.Groups["x"].Value, culture), float.Parse(pivot.Groups["y"].Value, culture));
+            var resolvedSize = new Vector2(float.Parse(extent.Groups["x"].Value, culture), float.Parse(extent.Groups["y"].Value, culture));
+            if (path.EndsWith(".prefab", StringComparison.Ordinal))
+            {
+                // Stretched children serialize only an offset from their parent, often a negative sizeDelta.
+                // Read the authored hierarchy's resolved rectangle before isolating it under centered anchors.
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                var found = false;
+                foreach (var candidate in prefab.GetComponentsInChildren<UiBackdropPanel>(true))
+                {
+                    if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(candidate, out _, out long id) && id == panelId)
+                    {
+                        resolvedSize = ((RectTransform)candidate.transform).rect.size;
+                        found = true;
+                        break;
+                    }
+                }
+                Assert.That(found, Is.True, path + ": resolve the actual prefab surface rectangle.");
+            }
+            Assert.That(resolvedSize.x > 0f && resolvedSize.y > 0f, Is.True, path + ": the isolated surface must retain its authored size.");
+            image.rectTransform.sizeDelta = resolvedSize;
+            var tintSource = Regex.Match(panelBody, @"_liquidTintSource: \{fileID: (?<id>-?\d+)\}");
+            if (tintSource.Success && tintSource.Groups["id"].Value != "0")
+            {
+                var source = CreateSerializedSurface(canvas, path, long.Parse(tintSource.Groups["id"].Value, culture));
+                typeof(UiBackdropPanel).GetField("_liquidTintSource", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(panel, source);
+            }
+#else
+            Assert.Ignore("This continuity fixture requires the actual Editor-imported scene and prefab artwork.");
+#endif
+            child.SetActive(true);
+            return panel;
+        }
+
         /// <summary>Copies one actual outer circular body without instantiating its sensor bindings or foreground controls.</summary>
         /// <param name="canvas">The isolated native UGUI root.</param>
         /// <returns>The authored peripheral panel with its original artwork and optical policy.</returns>
@@ -2016,6 +3093,53 @@ namespace MajdataPlay.Tests.Game.Rendering
 #endif
             child.SetActive(true);
             return panel;
+        }
+
+        /// <summary>Samples a covered face at its physical pixel-center coordinate, independent of integer raster phase.</summary>
+        /// <param name="pixels">The premultiplied GPU readback.</param>
+        /// <param name="size">The square readback dimensions.</param>
+        /// <param name="point">The physical output coordinate, whose texel centers lie at half-integers.</param>
+        /// <returns>The bilinearly reconstructed unpremultiplied interior color.</returns>
+        private static Color SampleInteriorRgb(Color[] pixels, int size, Vector2 point)
+        {
+            var coordinate = point - Vector2.one * 0.5f;
+            var x = Mathf.FloorToInt(coordinate.x);
+            var y = Mathf.FloorToInt(coordinate.y);
+            var lowerLeft = pixels[y * size + x];
+            var lowerRight = pixels[y * size + x + 1];
+            var upperLeft = pixels[(y + 1) * size + x];
+            var upperRight = pixels[(y + 1) * size + x + 1];
+            foreach (var pixel in new[] { lowerLeft, lowerRight, upperLeft, upperRight })
+            {
+                Assert.That(pixel.a, Is.GreaterThan(0.99f), "A reconstructed face probe must remain inside the fully covered surface.");
+            }
+            var color = Color.Lerp(Color.Lerp(lowerLeft, lowerRight, coordinate.x - x),
+                Color.Lerp(upperLeft, upperRight, coordinate.x - x), coordinate.y - y);
+            return color / color.a;
+        }
+
+        /// <summary>Averages an interior RGB probe without conflating the surface color with coverage.</summary>
+        /// <param name="pixels">The premultiplied GPU readback.</param>
+        /// <param name="size">The square readback dimensions.</param>
+        /// <param name="center">The probe center in output pixels.</param>
+        /// <param name="halfWidth">The horizontal probe radius in pixels.</param>
+        /// <param name="halfHeight">The vertical probe radius in pixels.</param>
+        /// <returns>The mean unpremultiplied color of the fully covered interior.</returns>
+        private static Color AverageInteriorRgb(Color[] pixels, int size, Vector2 center, int halfWidth, int halfHeight)
+        {
+            var sum = Color.clear;
+            var centerX = Mathf.RoundToInt(center.x);
+            var centerY = Mathf.RoundToInt(center.y);
+            for (var y = centerY - halfHeight; y <= centerY + halfHeight; y++)
+            {
+                for (var x = centerX - halfWidth; x <= centerX + halfWidth; x++)
+                {
+                    var pixel = pixels[y * size + x];
+                    Assert.That(pixel.a, Is.GreaterThan(0.99f), "A face probe must remain inside the fully covered surface.");
+                    sum += pixel / pixel.a;
+                }
+            }
+            return sum / ((halfWidth * 2 + 1) * (halfHeight * 2 + 1));
         }
 
         /// <summary>Measures the largest finite difference between equally sized GPU readbacks.</summary>
@@ -2181,6 +3305,43 @@ namespace MajdataPlay.Tests.Game.Rendering
             Shader.SetGlobalVector("_ScreenParams", new Vector4(128f, 128f, 1f + 1f / 128f, 1f + 1f / 128f));
         }
 
+        /// <summary>Exports flat and lit GPU readbacks over white for visual review without writing project assets.</summary>
+        /// <param name="name">The diagnostic PNG name without its extension.</param>
+        /// <param name="flat">The premultiplied reference pixels shown on the left.</param>
+        /// <param name="lit">The premultiplied optical pixels shown on the right.</param>
+        /// <param name="size">The square readback dimensions.</param>
+        private void WriteWhiteEdgePreview(string name, Color[] flat, Color[] lit, int size)
+        {
+            var preview = _objects.Track(new Texture2D(size * 2, size, TextureFormat.RGBA32, false, true));
+            var pixels = new Color[size * size * 2];
+            var linearReadback = QualitySettings.activeColorSpace == ColorSpace.Linear;
+            foreach (var side in new[] { 0, 1 })
+            {
+                var source = side == 0 ? flat : lit;
+                for (var y = 0; y < size; y++)
+                {
+                    for (var x = 0; x < size; x++)
+                    {
+                        var color = source[y * size + x];
+                        color += Color.white * (1f - color.a);
+                        if (linearReadback)
+                        {
+                            color = color.gamma;
+                        }
+                        color.a = 1f;
+                        pixels[y * size * 2 + x + side * size] = color;
+                    }
+                }
+            }
+            preview.SetPixels(pixels);
+            preview.Apply(false, false);
+            var directory = MajdataPlay.IO.Storage.FileSystem.Directory.Create(Application.temporaryCachePath)
+                .CreateDirectory("MajdataPlay.Tests").CreateDirectory("GlassEdgePreview");
+            var file = directory.FindFile(name + ".png") ?? directory.CreateFile(name + ".png");
+            file.WriteAllBytes(preview.EncodeToPNG());
+            TestContext.WriteLine($"GLASS_EDGE_PREVIEW {directory.Location}/{name}.png");
+        }
+
         /// <summary>Draws the native UI mesh using the same logical transform while comparing only the optical implementation.</summary>
         /// <param name="image">The control whose actual texture is bound per renderer.</param>
         /// <param name="material">The production-owned glass variant.</param>
@@ -2197,9 +3358,12 @@ namespace MajdataPlay.Tests.Game.Rendering
         {
             RenderTexture.active = target;
             GL.Clear(true, true, Color.clear);
+            var savedVertexColorGamma = Shader.GetGlobalInt("_UIVertexColorAlwaysGammaSpace");
             GL.PushMatrix();
             try
             {
+                // Raw UI meshes bypass Canvas conversion and still contain Gamma vertex colors.
+                Shader.SetGlobalInt("_UIVertexColorAlwaysGammaSpace", 1);
                 var halfSize = largeBoard ? target.width * 0.5f : 128f;
                 GL.LoadPixelMatrix(-halfSize, halfSize, -halfSize, halfSize);
                 var model = largeBoard || axisAligned ? Matrix4x4.identity : Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(0f, 0f, 17f), new Vector3(0.9f, 1.15f, 1f));
@@ -2214,6 +3378,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             }
             finally
             {
+                Shader.SetGlobalInt("_UIVertexColorAlwaysGammaSpace", savedVertexColorGamma);
                 GL.PopMatrix();
             }
             if (samples > 1)
@@ -2228,6 +3393,80 @@ namespace MajdataPlay.Tests.Game.Rendering
             reader.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
             reader.Apply(false, false);
             return reader.GetPixels();
+        }
+
+        /// <summary>Checks the real Login board does not filter the black outer mask into its lateral edge.</summary>
+        /// <returns>The authored RT1 coverage integration and final glass pixel regression.</returns>
+        [UnityTest]
+        [Category("GPU")]
+        public IEnumerator LoginBoard_ExcludesScreenMaskFromGlassBlur()
+        {
+            const int size = 1200;
+            const float radius = 532f / size;
+            var oldCamera = SceneSwitcher.MainCamera;
+            var camera = _objects.Add<Camera>();
+            camera.enabled = false;
+            camera.orthographic = true;
+            var source = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear));
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            Assert.That(source.Create() && target.Create() && resolved.Create(), Is.True);
+            camera.targetTexture = source;
+            var canvas = _objects.Add<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera = camera;
+            var display = _objects.Track(new GameObject("Main_Display", typeof(RectTransform)));
+            var displayRect = (RectTransform)display.transform;
+            displayRect.SetParent(canvas.transform, false);
+            displayRect.sizeDelta = Vector2.one * (2f * radius * size);
+            try
+            {
+                SceneSwitcher.MainCamera = camera;
+                UiOutlineTheme.Configure(UiOutlineMode.All);
+                UiPvBackdropBlur.Configure(true, UiBackdropStyle.LiquidGlass);
+                var board = CreateSerializedSurface(canvas, "Assets/Scenes/Login.unity", 900000000000000021L);
+                board.gameObject.SetActive(false);
+                board.transform.SetParent(displayRect, false);
+                board.gameObject.SetActive(true);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                Assert.That(board.MainDisplayRect, Is.SameAs(displayRect));
+                var capture = (IMajUiBackdropCapturePlan)MajUiBackdropBridge.GetActive(camera)!;
+                Assert.That(capture.Stages, Is.EqualTo(MajUiBackdropStages.Board));
+                var image = board.GetComponent<QualityUiImage>();
+                var material = _objects.Track(new Material(image.materialForRendering));
+                material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                material.SetFloat("_GlassRefraction", 0f);
+                Assert.That(material.GetFloat("_BackdropUsesPanelBlur"), Is.EqualTo(1f));
+                var mesh = BuildMesh(image);
+                var circle = CreateCircleCapture(size, Vector2.one * 0.5f, radius, Color.white);
+                using var commands = new CommandBuffer();
+                capture.BeginCamera(commands, camera);
+                commands.Blit(circle, source);
+                capture.Record(commands, camera, source);
+                Graphics.ExecuteCommandBuffer(commands);
+                const string coverage = "_MajUiPanelCaptureHasCoverage";
+                Assert.That(Shader.GetGlobalFloat(coverage), Is.EqualTo(1f));
+                Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                var covered = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true);
+                // The same blurred RGBA without normalization reproduces the black-contaminated edge.
+                Shader.SetGlobalFloat(coverage, 0f);
+                var unnormalized = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true);
+                AssertAlphaEqual(covered, unnormalized, "Background validity must not change the board's silhouette.");
+                var middle = size / 2 * size + size / 2;
+                Assert.That(covered[middle], Is.EqualTo(unnormalized[middle]));
+                var left = middle - 524;
+                Assert.That(covered[left].a, Is.GreaterThan(0.99f));
+                TestContext.WriteLine($"BOARD_APERTURE center={covered[middle]} edge={covered[left]} raw={unnormalized[left]} maxDelta={MaximumPixelDifference(covered, unnormalized, 3):F5}");
+                Assert.That(covered[left].grayscale, Is.GreaterThan(unnormalized[left].grayscale + 0.015f),
+                    "At the solid board edge, filtered RGB must be reconstructed from the circle's valid area.");
+                WriteWhiteEdgePreview("LoginBoard-Mask", unnormalized, covered, size);
+            }
+            finally
+            {
+                SceneSwitcher.MainCamera = oldCamera;
+            }
         }
 
         /// <summary>Checks the login board follows its actual clipped-arc artwork instead of a generic rounded rectangle.</summary>
@@ -2252,7 +3491,7 @@ namespace MajdataPlay.Tests.Game.Rendering
             Assert.That(matches, Is.EqualTo(1));
         }
 
-        /// <summary>Checks login input focus uses baked normal and selected outlines without losing either glass style.</summary>
+        /// <summary>Checks login input focus preserves the baked normal and selected rims in both glass styles.</summary>
         /// <returns>The real quality-image material, focus-sprite and style-switch lifecycle regression.</returns>
         [UnityTest]
         public IEnumerator LoginInputs_FocusSpriteRetainsBothGlassStyles()
@@ -2294,6 +3533,14 @@ namespace MajdataPlay.Tests.Game.Rendering
             ApplyAuthoredFields(panel, body);
             UiOutlineTheme.Configure(UiOutlineMode.All);
             child.SetActive(true);
+            const int size = 512;
+            var target = _objects.Track(new RenderTexture(size, size, 24, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var resolved = _objects.Track(new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear));
+            var reader = _objects.Track(new Texture2D(size, size, TextureFormat.RGBAFloat, false, true));
+            var capture = _objects.Track(new Texture2D(1, 1, TextureFormat.RGBAFloat, false, true));
+            capture.SetPixel(0, 0, new Color(0.31f, 0.33f, 0.37f, 1f));
+            capture.Apply(false, false);
+            Assert.That(target.Create() && resolved.Create(), Is.True);
             foreach (var style in new[] { UiBackdropStyle.GaussianBlur, UiBackdropStyle.LiquidGlass })
             {
                 UiPvBackdropBlur.Configure(true, style);
@@ -2312,6 +3559,35 @@ namespace MajdataPlay.Tests.Game.Rendering
                     Assert.That(panel.RefractionReady, Is.EqualTo(style == UiBackdropStyle.LiquidGlass && UiGlassOpticsAtlas.SupportsContourFiltering));
                     Assert.That(image.SourceMaterial, Is.SameAs(source));
                     Assert.That(image.rectTransform.sizeDelta, Is.EqualTo(new Vector2(400f, 80f)));
+                    var material = _objects.Track(new Material(image.materialForRendering));
+                    material.SetInt("_StencilComp", (int)CompareFunction.Always);
+                    var optics = material.GetVector("_LiquidGlassOptics");
+                    if (style == UiBackdropStyle.LiquidGlass)
+                    {
+                        Assert.That(optics.z, Is.Zero);
+                        Assert.That(optics.w, Is.Zero, "Both focus states must use only their authored narrow rim.");
+                        Assert.That(optics.x, Is.GreaterThan(0f));
+                    }
+                    var mesh = BuildMesh(image);
+                    SetCapture(capture);
+                    Shader.SetGlobalVector("_ScreenParams", new Vector4(size, size, 1f + 1f / size, 1f + 1f / size));
+                    var authoredRim = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    // Reinstate the narrow synthetic glint to isolate the change from the broad face lighting.
+                    material.SetVector("_LiquidGlassOptics", new Vector4(optics.x, optics.y, 2.4f, 1.4f));
+                    var extraRim = Draw(image, material, mesh, target, resolved, reader, 1, largeBoard: true, axisAligned: true);
+                    AssertAlphaEqual(authoredRim, extraRim, "Removing the extra highlight must retain the input silhouette.");
+                    var rgbChange = MaximumPixelDifference(authoredRim, extraRim, 3);
+                    if (panel.RefractionReady)
+                    {
+                        Assert.That(rgbChange, Is.GreaterThan(0.02f));
+                        var center = size / 2 * size + size / 2;
+                        Assert.That(authoredRim[center], Is.EqualTo(extraRim[center]), "The correction must leave the body color unchanged.");
+                        WriteWhiteEdgePreview("LoginInput-" + state.name, extraRim, authoredRim, size);
+                    }
+                    else
+                    {
+                        Assert.That(rgbChange, Is.Zero, "Gaussian and the fallback must ignore the optional contour reflection.");
+                    }
                 }
             }
             UiPvBackdropBlur.Configure(false);

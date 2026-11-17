@@ -200,6 +200,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                     using (var commands = new UnityEngine.Rendering.CommandBuffer())
                     {
                         commands.Blit(pattern, source);
+                        ((IMajUiBackdropCapturePlan)capture!).BeginCamera(commands, camera);
                         capture!.Record(commands, camera, source);
                         categories!.RecordCategories(commands, camera, source);
                         buttons!.RecordButtons(commands, camera, source);
@@ -217,6 +218,12 @@ namespace MajdataPlay.Tests.Game.Rendering
                         Assert.That(middle.height, Is.EqualTo(style == UiBackdropStyle.GaussianBlur ? 12 : 24));
                         Assert.That(last.width, Is.EqualTo(middle.width));
                         Assert.That(last.height, Is.EqualTo(middle.height));
+                        if (style == UiBackdropStyle.LiquidGlass)
+                        {
+                            Assert.That(Shader.GetGlobalVector("_MajUiButtonCaptureInvSize"),
+                                Is.EqualTo(new Vector4(1f / last.width, 1f / last.height, 0f, 0f)),
+                                "The physical key filter must use the actual half-size RT3 texel spacing.");
+                        }
                         var firstEdge = ReadBlurTexel(first, reader, first.width / 2 - 1, first.height / 8).r;
                         var middleEdge = ReadBlurTexel(middle, reader, middle.width / 2 - 1, middle.height / 8).r;
                         var lastEdge = ReadBlurTexel(last, reader, last.width / 2 - 1, last.height / 8).r;
@@ -371,7 +378,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                     using (var commands = new UnityEngine.Rendering.CommandBuffer())
                     {
                         commands.Blit(pattern, source);
-                        capture!.Record(commands, camera, source);
+                        ((IMajUiBackdropCapturePlan)capture!).BeginCamera(commands, camera);
                         categories.RecordCategories(commands, camera, source);
                         buttons.RecordButtons(commands, camera, source);
                         Graphics.ExecuteCommandBuffer(commands);
@@ -472,7 +479,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                     {
                         commands.SetRenderTarget(source);
                         commands.ClearRenderTarget(false, true, Color.black);
-                        capture!.Record(commands, camera, source);
+                        ((IMajUiBackdropCapturePlan)capture!).BeginCamera(commands, camera);
                         buttons!.RecordButtons(commands, camera, source);
                         Graphics.ExecuteCommandBuffer(commands);
                         Assert.That(Shader.GetGlobalFloat("_MajUiButtonBlurReady"), Is.EqualTo(1f));
@@ -728,8 +735,35 @@ namespace MajdataPlay.Tests.Game.Rendering
                     Assert.That(actualMatrix, Is.EqualTo(image.rectTransform.worldToLocalMatrix));
                     Assert.That(actualMatrix, Is.Not.EqualTo(beforeMove), "Canvas callbacks must update the contour after animation.");
                     var rect = image.GetPixelAdjustedRect();
-                    Assert.That(liquid.GetVector("_LiquidGlassRect"),
-                        Is.EqualTo(new Vector4(rect.center.x, rect.center.y, rect.width * 0.5f, rect.height * 0.5f)));
+                    var body = liquid.GetVector("_LiquidGlassRect");
+                    AssertFinite(body);
+                    Assert.That(body.z, Is.GreaterThan(0f));
+                    Assert.That(body.w, Is.GreaterThan(0f));
+                    const float bodyBoundsTolerance = 0.001f;
+                    Assert.That(body.x - body.z, Is.GreaterThanOrEqualTo(rect.xMin - bodyBoundsTolerance), "Visible-body coordinates must exclude padding without escaping the logical Image.");
+                    Assert.That(body.x + body.z, Is.LessThanOrEqualTo(rect.xMax + bodyBoundsTolerance));
+                    Assert.That(body.y - body.w, Is.GreaterThanOrEqualTo(rect.yMin - bodyBoundsTolerance));
+                    Assert.That(body.y + body.w, Is.LessThanOrEqualTo(rect.yMax + bodyBoundsTolerance));
+                    Assert.That(panel.TryGetOpticalContour(out var bodyContour), Is.True);
+                    var bodySprite = image.overrideSprite;
+                    if (UiAtlasMeshGenerator.TryGetLegacy(bodySprite, out var logicalSprite, out _))
+                    {
+                        bodySprite = logicalSprite;
+                    }
+                    if (type == UnityEngine.UI.Image.Type.Simple || bodySprite.border.sqrMagnitude == 0f)
+                    {
+                        // Simple geometry maps the measured source bounds affinely. Sliced geometry
+                        // without authored borders has the same mapping, independently of optical widths.
+                        var expectedBody = new Vector4(
+                            rect.center.x + bodyContour.Rect.x / bodyContour.Size.x * rect.width,
+                            rect.center.y + bodyContour.Rect.y / bodyContour.Size.y * rect.height,
+                            bodyContour.Rect.z / bodyContour.Size.x * rect.width,
+                            bodyContour.Rect.w / bodyContour.Size.y * rect.height);
+                        for (var axis = 0; axis < 4; axis++)
+                        {
+                            Assert.That(body[axis], Is.EqualTo(expectedBody[axis]).Within(bodyBoundsTolerance), "Lighting must follow measured visible-body bounds rather than the padded source rectangle.");
+                        }
+                    }
                     var shape = liquid.GetVector("_LiquidGlassShape");
                     AssertFinite(shape);
                     Assert.That(shape.x, Is.GreaterThan(0f));
@@ -1157,6 +1191,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Assert.That(material.GetFloat("_LiquidArtworkBlend"), Is.EqualTo(0.25f));
                 foreach (var current in new[] { material, stencil })
                 {
+                    Assert.That(current.GetFloat("_BackdropIsPanel"), Is.EqualTo(1f), "An explicitly bound nested surface must use plate lighting in owned and stencil variants.");
                     Assert.That(current.GetTexture("_LiquidTintSourceTex"), Is.SameAs(parentImage.mainTexture));
                     var uv = UnityEngine.Sprites.DataUtility.GetOuterUV(parentImage.overrideSprite);
                     Assert.That(current.GetVector("_LiquidTintSourceUV"), Is.EqualTo(new Vector4(
@@ -1192,6 +1227,8 @@ namespace MajdataPlay.Tests.Game.Rendering
                     Canvas.ForceUpdateCanvases();
                     foreach (var current in new[] { material, stencil })
                     {
+                        Assert.That(current.GetFloat("_BackdropIsPanel"), Is.EqualTo(invalidSource != null ? 1f : 0f),
+                            "The current source binding must update surface classification without replacing either material.");
                         Assert.That(current.GetTexture("_LiquidTintSourceTex"), Is.SameAs(Texture2D.whiteTexture));
                         Assert.That(current.GetVector("_LiquidTintSourceColor"), Is.EqualTo(new Vector4(1f, 1f, 1f, 0f)),
                             "Disabled, self and missing sources must safely preserve the child's own filter.");
@@ -1664,6 +1701,8 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Assert.That(capture, Is.Not.Null);
                 Assert.That(Field<List<UiBackdropPanel>>("s_panels"), Is.Empty);
                 Assert.That(Field<List<QualityUiImage>>("s_liquidFrameConsumers"), Is.EquivalentTo(new[] { frame }));
+                var plan = (IMajUiBackdropCapturePlan)capture!;
+                Assert.That(plan.Stages, Is.EqualTo(MajUiBackdropStages.Peripheral));
                 Assert.That(MajUiBackdropBridge.GetActiveCategories(capture, camera), Is.Null);
                 var buttons = MajUiBackdropBridge.GetActiveButtons(capture, camera);
                 Assert.That(buttons, Is.Not.Null, "A frame-only menu cannot rely on the existence of peripheral buttons to refresh its background.");
@@ -1671,7 +1710,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 {
                     commands.SetRenderTarget(source);
                     commands.ClearRenderTarget(false, true, Color.gray);
-                    capture!.Record(commands, camera, source);
+                    plan.BeginCamera(commands, camera);
                     buttons!.RecordButtons(commands, camera, source);
                     Graphics.ExecuteCommandBuffer(commands);
                 }
@@ -1724,7 +1763,7 @@ namespace MajdataPlay.Tests.Game.Rendering
         /// <summary>Checks single category consumers request only RT2 while preserving the startup pools on disable.</summary>
         /// <returns>The native category ownership regression.</returns>
         [UnityTest]
-        public IEnumerator CategoryOnlyConsumer_UsesFirstCaptureAndClearsReadinessOnDisable()
+        public IEnumerator CategoryOnlyConsumer_RequestsLaterStageAndCleansUpOnDisable()
         {
             return VerifySingleRoleOwnership(true);
         }
@@ -1759,27 +1798,58 @@ namespace MajdataPlay.Tests.Game.Rendering
                 body.color = Color.white;
                 var source = _objects.Track(new RenderTexture(8, 8, 0));
                 Assert.That(source.Create(), Is.True);
+                var board = CreatePanel();
+                typeof(UiBackdropPanel).GetField("_useStrongBlur", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(board, true);
+                typeof(UiBackdropPanel).GetField("_reusePanelCaptureOnly", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(board, true);
+                var boardImage = board.GetComponent<QualityUiImage>();
+                boardImage.canvas.renderMode = RenderMode.ScreenSpaceCamera;
+                boardImage.canvas.worldCamera = camera;
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                var laterStage = category ? MajUiBackdropStages.Category : MajUiBackdropStages.Peripheral;
+                var plan = (IMajUiBackdropCapturePlan)MajUiBackdropBridge.GetActive(camera)!;
+                Assert.That(board.ReusesPanelCaptureOnly, Is.True);
+                Assert.That(plan.Stages, Is.EqualTo(MajUiBackdropStages.Board | laterStage),
+                    "A visible reuse-only board still needs RT1 while a later stage owns capture.");
+                var reader = _objects.Track(new Texture2D(1, 1, TextureFormat.RGBA32, false, true));
                 using (var commands = new UnityEngine.Rendering.CommandBuffer())
                 {
+                    plan.BeginCamera(commands, camera);
                     commands.SetRenderTarget(source);
-                    commands.ClearRenderTarget(false, true, Color.gray);
-                    capture!.Record(commands, camera, source);
+                    commands.ClearRenderTarget(false, true, Color.red);
+                    plan.Record(commands, camera, source);
                     Graphics.ExecuteCommandBuffer(commands);
-                    Assert.That(Shader.GetGlobalFloat("_MajUiPanelBlurReady"), Is.Zero, "Absent boards cannot publish RT1, despite its preallocated native storage.");
+                    var retainedBoard = Field<RenderTexture>("s_boardBlurTexture");
+                    Assert.That(Shader.GetGlobalFloat("_MajUiPanelBlurReady"), Is.EqualTo(1f));
+                    Assert.That(ReadBlurTexel(retainedBoard, reader, 0, 0).r, Is.EqualTo(1f).Within(1f / 255f));
+
+                    boardImage.color = Color.clear;
+                    plan = (IMajUiBackdropCapturePlan)MajUiBackdropBridge.GetActive(camera)!;
+                    Assert.That(plan.Stages, Is.EqualTo(laterStage));
+                    Assert.That(Shader.GetGlobalFloat("_MajUiPanelBlurReady"), Is.EqualTo(1f),
+                        "Hiding the last board leaves stale readiness until the next camera command sequence begins.");
                     commands.Clear();
+                    plan.BeginCamera(commands, camera);
+                    commands.SetRenderTarget(source);
+                    commands.ClearRenderTarget(false, true, Color.green);
                     if (category)
                     {
-                        MajUiBackdropBridge.GetActiveCategories(capture, camera)!.RecordCategories(commands, camera, source);
+                        plan.RecordCategories(commands, camera, source);
                     }
                     else
                     {
-                        MajUiBackdropBridge.GetActiveButtons(capture, camera)!.RecordButtons(commands, camera, source);
+                        plan.RecordButtons(commands, camera, source);
                     }
                     Graphics.ExecuteCommandBuffer(commands);
+                    Assert.That(Shader.GetGlobalFloat("_MajUiPanelBlurReady"), Is.Zero, "The new frame must clear RT1 readiness without recording the board stage.");
+                    Assert.That(Field<RenderTexture>("s_boardBlurTexture"), Is.SameAs(retainedBoard));
+                    Assert.That(ReadBlurTexel(retainedBoard, reader, 0, 0).r, Is.EqualTo(1f).Within(1f / 255f),
+                        "Skipping RT1 must not write into the retained texture.");
                 }
                 var result = Field<RenderTexture>(category ? "s_categoryBlurTexture" : "s_buttonBlurTexture");
                 Assert.That(Shader.GetGlobalTexture(category ? "_MajPvBlurTexture" : "_MajUiButtonBlurTexture"), Is.SameAs(result));
                 Assert.That(Shader.GetGlobalFloat(category ? "_MajPvBlurReady" : "_MajUiButtonBlurReady"), Is.EqualTo(1f));
+                Assert.That(ReadBlurTexel(result, reader, 0, 0).g, Is.EqualTo(1f).Within(1f / 255f));
                 Assert.That(result.width, Is.EqualTo(2));
                 panel.enabled = false;
                 yield return null;
