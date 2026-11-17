@@ -319,6 +319,9 @@ namespace MajdataPlay
             }
 #endif
             Application.targetFrameRate = Settings.Display.FPSLimit;
+#if UNITY_ANDROID && !UNITY_EDITOR
+            AndroidRuntime.RequestXiaomiRefreshRate(Application.targetFrameRate);
+#endif
         }
 
 #if UNITY_STANDALONE_OSX && !UNITY_EDITOR
@@ -403,6 +406,13 @@ namespace MajdataPlay
         void OnApplicationFocus(bool focus)
         {
             IsAppOnFocus = focus;
+#if UNITY_ANDROID && !UNITY_EDITOR
+            // PowerKeeper may reload its per-game refresh policy while we are in the background.
+            if (focus)
+            {
+                AndroidRuntime.RequestXiaomiRefreshRate(Application.targetFrameRate);
+            }
+#endif
             if (OnAppFocus is not null)
             {
                 OnAppFocus(this, focus);

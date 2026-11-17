@@ -48,6 +48,19 @@ namespace MajdataPlay.Platform.Android
             }
 #endif
         }
+        public static void RequestXiaomiRefreshRate(int targetFrameRate)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                CurrentActivity.Call("requestXiaomiRefreshRate", targetFrameRate);
+            }
+            catch (Exception ex)
+            {
+                MajDebug.LogWarning($"Xiaomi refresh rate preference unavailable: {ex.Message}");
+            }
+#endif
+        }
         static void Android_OnNewIntent(AndroidJavaObject intent)
         {
             if (OnNewIntent is not null)
