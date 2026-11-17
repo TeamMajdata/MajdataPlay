@@ -181,8 +181,8 @@ namespace MajdataPlay.Platform.Android
                 {
                     return;
                 }
-                attributes.PreferredDisplayModeId = bestModeId;
-                attributes.PreferredRefreshRate = requestedRate;
+                attributes.JavaReference.Set("preferredDisplayModeId", bestModeId);
+                attributes.JavaReference.Set("preferredRefreshRate", (float)requestedRate);
                 window.SetAttributes(attributes);
 
                 // PowerKeeper's default 60 Hz game policy can override the window request.
