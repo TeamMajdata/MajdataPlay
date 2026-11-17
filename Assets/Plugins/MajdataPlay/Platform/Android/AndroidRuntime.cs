@@ -33,6 +33,38 @@ namespace MajdataPlay.Platform.Android
             }
         }
 
+        /// <summary>Asks Android to use a display refresh rate that can present the requested frame rate.</summary>
+        /// <param name="frameRate">
+        /// The display refresh rate to request in frames per second. A value of zero or less asks for
+        /// the fastest refresh rate the display offers.
+        /// </param>
+        /// <remarks>
+        /// The request keeps the current display resolution and applies to the current activity's window
+        /// and surface. It is posted to Android's UI thread and remains best effort: the system may refuse
+        /// it for power, thermal, or vendor-specific reasons. This method does not change Unity's
+        /// <see cref="Application.targetFrameRate"/>.
+        /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="frameRate"/> is NaN or infinite.</exception>
+        /// <exception cref="InvalidOperationException">The Android activity has not been created, or JNI cannot resolve the Java method.</exception>
+        /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java helper class.</exception>
+        /// <exception cref="JavaInvocationException">Java rejects the request.</exception>
+        public static void SetFrameRate(float frameRate)
+        {
+            if (float.IsNaN(frameRate) || float.IsInfinity(frameRate))
+            {
+                throw new ArgumentOutOfRangeException(nameof(frameRate), frameRate, "The frame rate must be a finite number.");
+            }
+            using var activity = CurrentActivity;
+            MajDebug.LogInfo(nameof(AndroidRuntime), $"Requesting display refresh rate: {frameRate} Hz");
+            AndroidJni.Call(
+                null,
+                "net.majdata.majdataplay.RefreshRate",
+                "request",
+                "(Landroid/app/Activity;F)V",
+                new object?[] { activity, frameRate });
+        }
+
         /// <summary>Gets whether metadata and all production activity callbacks initialized successfully.</summary>
         public static bool IsInitialized { get; private set; }
         /// <summary>Gets the installed application's Android version code after initialization.</summary>
