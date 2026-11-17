@@ -15,7 +15,8 @@ import android.view.WindowManager;
 import java.util.Locale;
 
 /**
- * Asks Android for a display refresh rate. {@code AndroidRuntime.SetFrameRate} calls it.
+ * Asks Android for a display refresh rate on the current window and surface.
+ * {@code AndroidRuntime.SetFrameRate} calls it.
  *
  * <p>Android 15 keeps an app whose category is "game" at 60 Hz until its surface asks for more
  * through {@code Surface.setFrameRate}, and some vendor systems keep the display at 60 Hz for an
@@ -23,18 +24,18 @@ import java.util.Locale;
  * {@code Application.targetFrameRate} alone does neither, so both are requested here. The system
  * may still refuse the request because of power saving, heat, or a vendor's own list of games.
  */
-public final class RefreshRate implements SurfaceHolder.Callback
+public final class SurfaceRefreshRate implements SurfaceHolder.Callback
 {
-    private static final String TAG = "MajdataPlayRefreshRate";
+    private static final String TAG = "MajdataPlaySurfaceRefreshRate";
     // The UI thread owns the current requester.
-    private static RefreshRate current;
+    private static SurfaceRefreshRate current;
 
     private final Activity activity;
     private float wanted;
     private float asked;
     private SurfaceHolder holder;
 
-    private RefreshRate(Activity activity)
+    private SurfaceRefreshRate(Activity activity)
     {
         this.activity = activity;
     }
@@ -55,7 +56,7 @@ public final class RefreshRate implements SurfaceHolder.Callback
             {
                 if (current == null || current.activity != activity)
                 {
-                    current = new RefreshRate(activity);
+                    current = new SurfaceRefreshRate(activity);
                 }
                 current.wanted = fps;
                 current.apply();

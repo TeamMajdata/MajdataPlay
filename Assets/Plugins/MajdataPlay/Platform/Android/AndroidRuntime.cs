@@ -1,4 +1,4 @@
-﻿#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR
 #define ANDROID_RUNTIME
 #endif
 using MajdataPlay.Diagnostics;
@@ -45,9 +45,9 @@ namespace MajdataPlay.Platform.Android
         /// <see cref="Application.targetFrameRate"/>.
         /// </remarks>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="frameRate"/> is NaN or infinite.</exception>
-        /// <exception cref="InvalidOperationException">The Android activity has not been created, or JNI cannot resolve the Java method.</exception>
+        /// <exception cref="InvalidOperationException">The Android activity has not been created, or JNI cannot allocate a reference or frame.</exception>
         /// <exception cref="PlatformNotSupportedException">Execution is outside an Android player.</exception>
-        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java helper class.</exception>
+        /// <exception cref="AndroidJavaException">Unity cannot resolve the Java helper class or its method.</exception>
         /// <exception cref="JavaInvocationException">Java rejects the request.</exception>
         public static void SetFrameRate(float frameRate)
         {
@@ -57,12 +57,7 @@ namespace MajdataPlay.Platform.Android
             }
             using var activity = CurrentActivity;
             MajDebug.LogInfo(nameof(AndroidRuntime), $"Requesting display refresh rate: {frameRate} Hz");
-            AndroidJni.Call(
-                null,
-                "net.majdata.majdataplay.RefreshRate",
-                "request",
-                "(Landroid/app/Activity;F)V",
-                new object?[] { activity, frameRate });
+            SurfaceRefreshRate.Request(activity, frameRate);
         }
 
         /// <summary>Gets whether metadata and all production activity callbacks initialized successfully.</summary>
@@ -83,11 +78,12 @@ namespace MajdataPlay.Platform.Android
         private static readonly AndroidLogger s_logger = new();
 
         /// <summary>Registers production callbacks and publishes metadata only after initialization succeeds.</summary>
+#if ANDROID_RUNTIME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+#endif
         private static void Init()
         {
             IsInitialized = false;
-#if ANDROID_RUNTIME
             MajDebug.AddLogger(s_logger);
             VersionCode = 0;
             SdkVersion = 0;
@@ -126,7 +122,6 @@ namespace MajdataPlay.Platform.Android
             {
                 MajDebug.LogError($"[{nameof(AndroidRuntime)}] Init failed: {ex}");
             }
-#endif
         }
         /// <summary>Forwards the borrowed Java intent to managed subscribers.</summary>
         /// <param name="intent">The intent borrowed for the callback duration.</param>
