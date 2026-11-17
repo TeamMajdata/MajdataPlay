@@ -172,7 +172,7 @@
     "MAJSETTING_PROPERTY_FastRetry": "快速重开",
     "MAJSETTING_PROPERTY_FastRetry_DESC": "按住3、4、5、6键快速重开",
     "MAJSETTING_PROPERTY_FrameRate": "帧率",
-    "MAJSETTING_PROPERTY_FrameRate_DESC": " ",
+    "MAJSETTING_PROPERTY_FrameRate_DESC": "设定录制视频的帧率",
     "MAJSETTING_PROPERTY_FullScreen": "强制全屏",
     "MAJSETTING_PROPERTY_FullScreen_DESC": "无",
     "MAJSETTING_PROPERTY_GameplayScreenRotationAngle": "游戏画面旋转",
@@ -274,7 +274,7 @@
     "MAJSETTING_PROPERTY_Random_OPTION_RANDOM": "Random",
     "MAJSETTING_PROPERTY_Random_OPTION_S_RANDOM": "S-Random",
     "MAJSETTING_PROPERTY_RateControlMode": "码率控制",
-    "MAJSETTING_PROPERTY_RateControlMode_DESC": " ",
+    "MAJSETTING_PROPERTY_RateControlMode_DESC": "设定编码器的码率控制方式",
     "MAJSETTING_PROPERTY_RecordMode": "录制模式",
     "MAJSETTING_PROPERTY_RecordMode_DESC": "OBS：连接OBS WebSocket自动录制。需在OBS开启WebSocket服务并关闭身份验证",
     "MAJSETTING_PROPERTY_RenderQuality": "渲染质量",
@@ -341,7 +341,7 @@
     "MAJSETTING_PROPERTY_SlideSkipping_DESC": "开启/关闭Slide跳区机制",
     "MAJSETTING_PROPERTY_SlideSkipping_OPTION_False": "禁用",
     "MAJSETTING_PROPERTY_SlideSkipping_OPTION_True": "启用",
-    "MAJSETTING_PROPERTY_SlideSkipping_OPTION_UNSET": "",
+    "MAJSETTING_PROPERTY_SlideSkipping_OPTION_UNSET": "未设置",
     "MAJSETTING_PROPERTY_SlideSortOrder": "Slide排列顺序",
     "MAJSETTING_PROPERTY_SlideSortOrder_DESC": "Slide排序：Classic旧在下，Modern旧在上（影响星星变色）",
     "MAJSETTING_PROPERTY_SlideSortOrder_OPTION_Classic": "Classic",
@@ -505,6 +505,9 @@
     "MAJTEXT_THUMBUP_SENDED": "点赞成功",
     "MAJTEXT_THUMBUP_SENDING": "点赞中...",
     "MAJTEXT_WAITING_FOR_BACKGROUND_TASKS_SUSPEND": "正在等待所有后台任务完成",
-    "MAJTEXT_WAITING_FOR_RECORDER": "正在等待录制器"
+    "MAJTEXT_WAITING_FOR_RECORDER": "正在等待录制器",
+    "MAJSETTING_PROPERTY_RecordMode_OPTION_Disable": "禁用",
+    "MAJSETTING_PROPERTY_RecordMode_OPTION_FFmpeg": "FFmpeg",
+    "MAJSETTING_PROPERTY_RecordMode_OPTION_OBSTrigger": "OBS 触发"
   }
 }
