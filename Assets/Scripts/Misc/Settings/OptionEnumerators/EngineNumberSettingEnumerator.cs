@@ -16,6 +16,9 @@ public sealed class EngineNumberSettingEnumerator : DefaultNumberEnumerator, IOp
         {
             case "FPSLimit":
                 Application.targetFrameRate = (int)CurrentValue;
+#if UNITY_ANDROID && !UNITY_EDITOR
+                MajdataPlay.Platform.Android.AndroidRuntime.RequestXiaomiRefreshRate(Application.targetFrameRate);
+#endif
                 break;
         }
         _lastValue = (int)CurrentValue;

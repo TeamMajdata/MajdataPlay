@@ -368,6 +368,9 @@ namespace MajdataPlay
             QualitySettings.vSyncCount = renderingOptions.VSync ? 1 : 0;
 #endif
             Application.targetFrameRate = renderingOptions.FPSLimit;
+#if ANDROID_RUNTIME
+            AndroidRuntime.RequestXiaomiRefreshRate(Application.targetFrameRate);
+#endif
         }
 
         internal static void ApplyRenderingSettings()
@@ -531,6 +534,13 @@ namespace MajdataPlay
         private void OnApplicationFocus(bool focus)
         {
             IsAppOnFocus = focus;
+#if ANDROID_RUNTIME
+            // PowerKeeper may reload its per-game refresh policy while we are in the background.
+            if (focus)
+            {
+                AndroidRuntime.RequestXiaomiRefreshRate(Application.targetFrameRate);
+            }
+#endif
             if (OnAppFocus is not null)
             {
                 OnAppFocus(this, focus);
