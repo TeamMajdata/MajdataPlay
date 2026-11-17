@@ -31,6 +31,9 @@ namespace MajdataPlay.Tests.Game.Rendering
             var oldCamera = SceneSwitcher.MainCamera;
             var oldTarget = RenderTexture.active;
             var oldGuiZTest = Shader.GetGlobalInt("unity_GUIZTestMode");
+            var oldBoard = Shader.GetGlobalTexture("_MajUiPanelBlurTexture");
+            var oldBoardReady = Shader.GetGlobalFloat("_MajUiPanelBlurReady");
+            var oldCategoriesReady = Shader.GetGlobalFloat("_MajPvBlurReady");
             var oldButtons = Shader.GetGlobalTexture("_MajUiButtonBlurTexture");
             var oldButtonsReady = Shader.GetGlobalFloat("_MajUiButtonBlurReady");
             var oldClip = Shader.GetGlobalVector("_MajUiButtonClipUvX");
@@ -186,6 +189,75 @@ namespace MajdataPlay.Tests.Game.Rendering
                     Assert.That((bool)renderer.GetType().GetField("_usingBackdropNativePass", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(renderer)!, Is.False);
                     Assert.That((bool)renderer.GetType().GetField("_backdropNativePassOpen", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(renderer)!, Is.False);
                     TestContext.WriteLine($"MRP_NATIVE_PREFIX api={SystemInfo.graphicsDeviceType} samples={actualSamples} optimize={optimizeAttachments} storeResolve={SystemInfo.supportsStoreAndResolveAction} native={nativeExpected} stencil=preserved");
+                    try
+                    {
+                        foreach (var stages in new[] { MajUiBackdropStages.Category | MajUiBackdropStages.Peripheral,
+                            MajUiBackdropStages.Category, MajUiBackdropStages.Peripheral,
+                            MajUiBackdropStages.Board | MajUiBackdropStages.Category | MajUiBackdropStages.Peripheral })
+                        {
+                            var planned = new PlannedPrefixCapture(capture, prefixes[0], events, stages);
+                            MajUiBackdropBridge.Register(planned);
+                            events.Clear();
+                            capture.NativeModes.Clear();
+                            foreach (var target in prefixes)
+                            {
+                                RenderTexture.active = target;
+                                GL.Clear(false, true, Color.gray);
+                            }
+                            // Poison all readiness flags so the frame callback must reset even a skipped stage.
+                            Shader.SetGlobalTexture("_MajUiPanelBlurTexture", prefixes[0]);
+                            Shader.SetGlobalFloat("_MajUiPanelBlurReady", 1f);
+                            Shader.SetGlobalFloat("_MajPvBlurReady", 1f);
+                            Shader.SetGlobalFloat("_MajUiButtonBlurReady", 1f);
+                            camera.Render();
+                            var boardRequested = (stages & MajUiBackdropStages.Board) != 0;
+                            var categoryRequested = (stages & MajUiBackdropStages.Category) != 0;
+                            var buttonsRequested = (stages & MajUiBackdropStages.Peripheral) != 0;
+                            var expectedEvents = new List<int> { 0 };
+                            if (boardRequested)
+                            {
+                                expectedEvents.Add(1);
+                            }
+                            expectedEvents.Add(10);
+                            if (categoryRequested)
+                            {
+                                expectedEvents.Add(2);
+                            }
+                            if (buttonsRequested)
+                            {
+                                expectedEvents.Add(3);
+                            }
+                            Assert.That(events, Is.EqualTo(expectedEvents), "The frame reset must precede only the requested capture cuts: " + stages);
+                            Assert.That(capture.NativeModes.Count, Is.EqualTo(expectedEvents.Count - 2), "Only requested capture callbacks may observe the native render-pass state.");
+                            foreach (var nativeMode in capture.NativeModes)
+                            {
+                                Assert.That(nativeMode, Is.EqualTo(nativeExpected));
+                            }
+                            AssertColor(Read(prefixes[0], reader), boardRequested ? ringColor : Color.gray,
+                                "A frame reset must not touch retained RT1 when the Board stage is absent.");
+                            AssertColor(Read(prefixes[1], reader, 16, 32), categoryRequested ? Color.blue : Color.gray,
+                                "RT2 must capture the completed board/cover prefix only when requested.");
+                            AssertColor(Read(prefixes[2], reader, 16, 32), buttonsRequested ? Color.cyan : Color.gray,
+                                "RT3 must include categories and ordinary UI without including peripheral bodies.");
+                            Assert.That(Shader.GetGlobalFloat("_MajUiPanelBlurReady"), Is.EqualTo(boardRequested ? 1f : 0f));
+                            Assert.That(Shader.GetGlobalFloat("_MajPvBlurReady"), Is.EqualTo(categoryRequested ? 1f : 0f));
+                            Assert.That(Shader.GetGlobalFloat("_MajUiButtonBlurReady"), Is.EqualTo(buttonsRequested ? 1f : 0f));
+                            AssertColor(Read(final, reader, 16, 32), Color.magenta, "Optional capture cuts cannot omit the final peripheral bodies.");
+                            AssertColor(Read(final, reader, 48, 32), Color.yellow, "Skipping RT1 must preserve the same stencil rejection through final presentation.");
+                            AssertColor(Read(final, reader, 4, 4), Color.black, "The early depth mask must survive every requested stage combination.");
+                            TestContext.WriteLine($"MRP_PLANNED_PREFIX stages={stages} samples={samples} native={nativeExpected} callbacks={events.Count} rt1Written={boardRequested}");
+                        }
+                    }
+                    finally
+                    {
+                        MajUiBackdropBridge.Register(capture);
+                        events.Clear();
+                        capture.NativeModes.Clear();
+                        Shader.SetGlobalTexture("_MajUiPanelBlurTexture", oldBoard);
+                        Shader.SetGlobalFloat("_MajUiPanelBlurReady", oldBoardReady);
+                        Shader.SetGlobalFloat("_MajPvBlurReady", oldCategoriesReady);
+                        Shader.SetGlobalFloat("_MajUiButtonBlurReady", oldButtonsReady);
+                    }
                     displayMaskRenderer.enabled = false;
                     camera.Render();
                     AssertColor(Read(prefixes[0], reader, 4, 4), Color.red,
@@ -356,6 +428,9 @@ namespace MajdataPlay.Tests.Game.Rendering
                     SceneSwitcher.MainCamera = oldCamera;
                     RenderTexture.active = oldTarget;
                     Shader.SetGlobalInt("unity_GUIZTestMode", oldGuiZTest);
+                    Shader.SetGlobalTexture("_MajUiPanelBlurTexture", oldBoard);
+                    Shader.SetGlobalFloat("_MajUiPanelBlurReady", oldBoardReady);
+                    Shader.SetGlobalFloat("_MajPvBlurReady", oldCategoriesReady);
                     Shader.SetGlobalTexture("_MajUiButtonBlurTexture", oldButtons);
                     Shader.SetGlobalFloat("_MajUiButtonBlurReady", oldButtonsReady);
                     Shader.SetGlobalVector("_MajUiButtonClipUvX", oldClip);
@@ -481,6 +556,74 @@ namespace MajdataPlay.Tests.Game.Rendering
                     buffer.SetGlobalFloat("_MajUiButtonBlurReady", 1f);
                     buffer.SetGlobalVector("_MajUiButtonClipUvX", Vector4.zero);
                 }
+            }
+        }
+
+        /// <summary>Opts into an explicit stage plan while delegating real prefix copies to the legacy recorder.</summary>
+        private sealed class PlannedPrefixCapture : IMajUiBackdropCapturePlan
+        {
+            /// <summary>Records real camera sources and their native render-pass boundaries.</summary>
+            private readonly PrefixCapture _recorder;
+            /// <summary>Retains the Board texture whose contents must survive a skipped first stage.</summary>
+            private readonly RenderTexture _boardTarget;
+            /// <summary>Records frame preparation before the extension and capture callbacks.</summary>
+            private readonly List<int> _events;
+            /// <summary>Initializes the per-camera plan without owning any render resources.</summary>
+            /// <param name="recorder">The existing real-source capture recorder.</param>
+            /// <param name="boardTarget">The retained RT1 used to detect accidental copies or clears.</param>
+            /// <param name="events">The synchronous callback sequence.</param>
+            /// <param name="stages">The complete set of requested capture cuts.</param>
+            internal PlannedPrefixCapture(PrefixCapture recorder, RenderTexture boardTarget, List<int> events, MajUiBackdropStages stages)
+            {
+                _recorder = recorder;
+                _boardTarget = boardTarget;
+                _events = events;
+                Stages = stages;
+            }
+            /// <inheritdoc/>
+            public MajUiBackdropStages Stages { get; }
+            /// <inheritdoc/>
+            public bool IsActive(Camera camera)
+            {
+                return _recorder.IsActive(camera);
+            }
+            /// <inheritdoc/>
+            public void BeginCamera(CommandBuffer buffer, Camera camera)
+            {
+                _events.Add(0);
+                buffer.SetGlobalFloat("_MajUiPanelBlurReady", 0f);
+                buffer.SetGlobalFloat("_MajPvBlurReady", 0f);
+                buffer.SetGlobalFloat("_MajUiButtonBlurReady", 0f);
+            }
+            /// <inheritdoc/>
+            public bool RequiresCategoryCapture(Camera camera)
+            {
+                // Planned capture flags are authoritative; legacy queries must not be used again.
+                return false;
+            }
+            /// <inheritdoc/>
+            public bool RequiresButtonCapture(Camera camera)
+            {
+                return false;
+            }
+            /// <inheritdoc/>
+            public void Record(CommandBuffer buffer, Camera camera, RenderTexture resolvedColor)
+            {
+                _recorder.Record(buffer, camera, resolvedColor);
+                buffer.SetGlobalTexture("_MajUiPanelBlurTexture", _boardTarget);
+                buffer.SetGlobalFloat("_MajUiPanelBlurReady", 1f);
+            }
+            /// <inheritdoc/>
+            public void RecordCategories(CommandBuffer buffer, Camera camera, RenderTexture resolvedColor)
+            {
+                _recorder.RecordCategories(buffer, camera, resolvedColor);
+                buffer.SetGlobalFloat("_MajPvBlurReady", 1f);
+            }
+            /// <inheritdoc/>
+            public void RecordButtons(CommandBuffer buffer, Camera camera, RenderTexture resolvedColor)
+            {
+                _recorder.RecordButtons(buffer, camera, resolvedColor);
+                buffer.SetGlobalFloat("_MajUiButtonBlurReady", 1f);
             }
         }
 

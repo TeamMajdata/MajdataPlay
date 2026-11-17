@@ -4041,6 +4041,7 @@ MonoBehaviour:
   _liquidOnly: 0
   _liquidEllipse: 1
   _liquidCapsule: 0
+  _liquidSuppressContourGlint: 1
   _fillSamplePosition: {x: 0.5, y: 0.5}
   _buttonForegroundRoot: {fileID: 86439849}
   _fillAlpha: 1
@@ -4068,6 +4069,7 @@ MonoBehaviour:
   _liquidOnly: 0
   _liquidEllipse: 1
   _liquidCapsule: 0
+  _liquidSuppressContourGlint: 1
   _fillSamplePosition: {x: 0.5, y: 0.5}
   _buttonForegroundRoot: {fileID: 256638718}
   _fillAlpha: 1
@@ -4092,6 +4094,8 @@ MonoBehaviour:
   _liquidEllipse: 0
   _liquidCapsule: 0
   _liquidArtworkContour: 1
+  _liquidSuppressContourGlint: 1
+  _liquidClipBoardCapture: 1
   _fillSamplePosition: {x: 0.5, y: 0.5}
   _backgroundImage: {fileID: 1885611386}
   _useStrongBlur: 1
@@ -4129,6 +4133,7 @@ MonoBehaviour:
   _liquidEllipse: 0
   _liquidCapsule: 0
   _liquidBodyInsets: {x: 0.0258064516, y: 0.0258064516, z: 0.0258064516, w: 0.0258064516}
+  _liquidSuppressContourGlint: 1
   _fillSamplePosition: {x: 0.5, y: 0.5}
   _backgroundImage: {fileID: 0}
   _isButton: 0
@@ -4157,6 +4162,7 @@ MonoBehaviour:
   _liquidEllipse: 0
   _liquidCapsule: 0
   _liquidBodyInsets: {x: 0.0258064516, y: 0.0258064516, z: 0.0258064516, w: 0.0258064516}
+  _liquidSuppressContourGlint: 1
   _fillSamplePosition: {x: 0.5, y: 0.5}
   _backgroundImage: {fileID: 0}
   _isButton: 0

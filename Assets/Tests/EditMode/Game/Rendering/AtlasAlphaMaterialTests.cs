@@ -236,8 +236,6 @@ namespace MajdataPlay.Tests.Game.Rendering
             var savedTextureAdd = Shader.GetGlobalVector("_TextureSampleAdd");
             var savedBlur = Shader.GetGlobalTexture("_MajPvBlurTexture");
             var savedButtonBlur = Shader.GetGlobalTexture("_MajUiButtonBlurTexture");
-            var savedButtonBlurSize = Shader.GetGlobalVector("_MajUiButtonBlurTexture_TexelSize");
-            var savedBlurSize = Shader.GetGlobalVector("_MajPvBlurTexture_TexelSize");
             var savedPanelReady = Shader.GetGlobalFloat("_MajPvBlurReady");
             var savedButtonReady = Shader.GetGlobalFloat("_MajUiButtonBlurReady");
             var savedLiquidStyle = s_liquidStyle;
@@ -289,8 +287,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Shader.SetGlobalVector("_TextureSampleAdd", Vector4.zero);
                 Shader.SetGlobalTexture("_MajPvBlurTexture", blurTexture);
                 Shader.SetGlobalTexture("_MajUiButtonBlurTexture", blurTexture);
-                Shader.SetGlobalVector("_MajUiButtonBlurTexture_TexelSize", Vector4.one);
-                Shader.SetGlobalVector("_MajPvBlurTexture_TexelSize", Vector4.one);
                 s_liquidStyle = liquid;
 
                 foreach (var background in new[] { Color.black, Color.white, new Color(0.2f, 0.4f, 0.6f, 1f) })
@@ -353,7 +349,8 @@ namespace MajdataPlay.Tests.Game.Rendering
                         material.SetFloat("_BackdropIsButton", category ? 0f : 1f);
                         Shader.SetGlobalFloat("_MajPvBlurReady", category ? 1f : 0f);
                         Shader.SetGlobalFloat("_MajUiButtonBlurReady", category ? 0f : 1f);
-                        var expected = sampled * artworkTexture.GetPixel(0, 0);
+                        var tintStrength = liquid && !category ? 0.72f : 1f;
+                        var expected = sampled * Color.Lerp(Color.white, artworkTexture.GetPixel(0, 0), tintStrength);
                         expected.a = 1f;
                         AssertColor(DrawAndReadCenter(material, target, resolved, readback, samples), expected,
                             $"{samples}x {(category ? "category" : "button")} multiplies actual artwork and retains its Ready route");
@@ -430,8 +427,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Shader.SetGlobalVector("_TextureSampleAdd", savedTextureAdd);
                 Shader.SetGlobalTexture("_MajPvBlurTexture", savedBlur);
                 Shader.SetGlobalTexture("_MajUiButtonBlurTexture", savedButtonBlur);
-                Shader.SetGlobalVector("_MajUiButtonBlurTexture_TexelSize", savedButtonBlurSize);
-                Shader.SetGlobalVector("_MajPvBlurTexture_TexelSize", savedBlurSize);
                 Shader.SetGlobalFloat("_MajPvBlurReady", savedPanelReady);
                 Shader.SetGlobalFloat("_MajUiButtonBlurReady", savedButtonReady);
                 s_liquidStyle = savedLiquidStyle;
@@ -476,7 +471,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 savedFloats.Add(name, Shader.GetGlobalFloat(name));
             }
             var savedVectors = new System.Collections.Generic.Dictionary<string, Vector4>();
-            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd", "_MajPvBlurTexture_TexelSize", "_MajUiPanelBlurTexture_TexelSize", "_MajUiButtonBlurTexture_TexelSize" })
+            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd" })
             {
                 savedVectors.Add(name, Shader.GetGlobalVector(name));
             }
@@ -517,8 +512,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Shader.SetGlobalVector("_TextureSampleAdd", Vector4.zero);
                 Shader.SetGlobalTexture("_MajPvBlurTexture", capture);
                 Shader.SetGlobalTexture("_MajUiButtonBlurTexture", capture);
-                Shader.SetGlobalVector("_MajUiButtonBlurTexture_TexelSize", Vector4.one);
-                Shader.SetGlobalVector("_MajPvBlurTexture_TexelSize", Vector4.one);
                 Shader.SetGlobalFloat("_MajPvBlurReady", 1f);
                 s_liquidStyle = true;
                 foreach (var background in new[] { Color.white, new Color(0.2f, 0.4f, 0.6f, 1f) })
@@ -587,9 +580,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 {
                     artwork.SetPixel(0, 0, childColor);
                     artwork.Apply(false, false);
-                    var expected = Color.Lerp(capture.GetPixel(0, 0) * Color.Lerp(Color.white, artwork.GetPixel(0, 0), 0.9f),
-                        artwork.GetPixel(0, 0), 0.25f);
-                    expected.a = 1f;
                     foreach (var isButton in new[] { false, true })
                     {
                         material.SetFloat("_BackdropIsButton", isButton ? 1f : 0f);
@@ -604,7 +594,13 @@ namespace MajdataPlay.Tests.Game.Rendering
                         AssertColor(gaussian, gaussianExpected, "Only Gaussian peripheral controls use the independent lighter tint cap.");
                         s_liquidStyle = true;
                         var liquid = DrawAndReadCenter(material, target, resolved, readback, samples);
-                        AssertColor(liquid, expected, "Liquid retains its original 0.9 tint and 0.25 artwork share.");
+                        var authoredFill = artwork.GetPixel(0, 0);
+                        var liquidStrength = isButton ? 0.72f : 0.9f;
+                        var liquidArtworkShare = isButton ? 0.18f : 0.25f;
+                        var liquidExpected = Color.Lerp(capture.GetPixel(0, 0) * Color.Lerp(Color.white, authoredFill, liquidStrength),
+                            authoredFill, liquidArtworkShare);
+                        liquidExpected.a = 1f;
+                        AssertColor(liquid, liquidExpected, "Only physical keys use the more transmissive Liquid Glass recipe.");
                         var originalLiquidPixels = readback.GetPixels();
                         material.SetFloat("_GaussianButtonTintStrength", 0.2f);
                         DrawAndReadCenter(material, target, resolved, readback, samples);
@@ -618,7 +614,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                         }
                         else if (childColor != Color.white)
                         {
-                            Assert.That(gaussian.r, Is.GreaterThan(liquid.r), "The new Gaussian default must visibly lighten a dark peripheral fill.");
                             Assert.That(changedGaussian.r, Is.GreaterThan(gaussian.r));
                         }
                         material.SetFloat("_GaussianButtonTintStrength", 0.65f);
@@ -636,7 +631,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 parentArtwork.SetPixels(blue);
                 parentArtwork.Apply(false, false);
                 Shader.SetGlobalTexture("_MajUiPanelBlurTexture", parentArtwork);
-                Shader.SetGlobalVector("_MajUiPanelBlurTexture_TexelSize", new Vector4(0.25f, 0.25f, 4f, 4f));
                 material.SetColor("_Color", Color.white);
                 material.SetFloat("_TintStrength", 1f);
                 material.SetFloat("_FrostStrength", 0f);
@@ -722,7 +716,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 savedFloats.Add(name, Shader.GetGlobalFloat(name));
             }
             var savedVectors = new System.Collections.Generic.Dictionary<string, Vector4>();
-            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd", "_MajPvBlurTexture_TexelSize" })
+            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd" })
             {
                 savedVectors.Add(name, Shader.GetGlobalVector(name));
             }
@@ -774,7 +768,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Shader.SetGlobalInt("_UIVertexColorAlwaysGammaSpace", 0);
                 Shader.SetGlobalVector("_TextureSampleAdd", Vector4.zero);
                 Shader.SetGlobalTexture("_MajPvBlurTexture", ramp);
-                Shader.SetGlobalVector("_MajPvBlurTexture_TexelSize", new Vector4(1f / 128f, 1f / 128f, 128f, 128f));
                 Shader.SetGlobalFloat("_MajPvBlurReady", 1f);
                 s_liquidStyle = true;
                 material.SetFloat("_GlassRefraction", 0f);
@@ -796,7 +789,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 AssertColor(readback.GetPixel(20, 16), straight[16 * TargetSize + 20], "The narrow-band control must leave this deep probe unchanged");
 
                 Shader.SetGlobalTexture("_MajPvBlurTexture", capture);
-                Shader.SetGlobalVector("_MajPvBlurTexture_TexelSize", Vector4.one);
                 material.SetFloat("_GlassRefraction", 0f);
                 material.SetFloat("_ReferenceOpacity", 0.85f);
                 foreach (var artworkShare in new[] { 0.25f, 0.5f })
@@ -922,7 +914,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 savedFloats.Add(name, Shader.GetGlobalFloat(name));
             }
             var savedVectors = new System.Collections.Generic.Dictionary<string, Vector4>();
-            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd", "_MajPvBlurTexture_TexelSize" })
+            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd" })
             {
                 savedVectors.Add(name, Shader.GetGlobalVector(name));
             }
@@ -966,7 +958,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Shader.SetGlobalInt("_UIVertexColorAlwaysGammaSpace", 0);
                 Shader.SetGlobalVector("_TextureSampleAdd", Vector4.zero);
                 Shader.SetGlobalTexture("_MajPvBlurTexture", capture);
-                Shader.SetGlobalVector("_MajPvBlurTexture_TexelSize", Vector4.one);
                 Shader.SetGlobalFloat("_MajPvBlurReady", 1f);
                 s_liquidStyle = true;
                 alpha.SetColor("_Color", Color.white);
@@ -1041,7 +1032,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 savedFloats.Add(name, Shader.GetGlobalFloat(name));
             }
             var savedVectors = new System.Collections.Generic.Dictionary<string, Vector4>();
-            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd", "_MajPvBlurTexture_TexelSize" })
+            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd" })
             {
                 savedVectors.Add(name, Shader.GetGlobalVector(name));
             }
@@ -1105,7 +1096,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Shader.SetGlobalInt("_UIVertexColorAlwaysGammaSpace", 0);
                 Shader.SetGlobalVector("_TextureSampleAdd", Vector4.zero);
                 Shader.SetGlobalTexture("_MajPvBlurTexture", source);
-                Shader.SetGlobalVector("_MajPvBlurTexture_TexelSize", new Vector4(1f / 128f, 1f / 128f, 128f, 128f));
                 Shader.SetGlobalFloat("_MajPvBlurReady", 1f);
                 s_liquidStyle = true;
                 foreach (var localToWorld in new[] {
@@ -1294,7 +1284,7 @@ namespace MajdataPlay.Tests.Game.Rendering
                 savedFloats.Add(name, Shader.GetGlobalFloat(name));
             }
             var savedVectors = new System.Collections.Generic.Dictionary<string, Vector4>();
-            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd", "_MajPvBlurTexture_TexelSize", "_MajUiButtonBlurTexture_TexelSize" })
+            foreach (var name in new[] { "_ScreenParams", "_TextureSampleAdd" })
             {
                 savedVectors.Add(name, Shader.GetGlobalVector(name));
             }
@@ -1346,8 +1336,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 Shader.SetGlobalVector("_TextureSampleAdd", Vector4.zero);
                 Shader.SetGlobalTexture("_MajPvBlurTexture", blur);
                 Shader.SetGlobalTexture("_MajUiButtonBlurTexture", blur);
-                Shader.SetGlobalVector("_MajUiButtonBlurTexture_TexelSize", Vector4.one);
-                Shader.SetGlobalVector("_MajPvBlurTexture_TexelSize", Vector4.one);
                 Shader.SetGlobalFloat("_MajPvBlurReady", 1f);
                 Shader.SetGlobalFloat("_MajUiButtonBlurReady", 1f);
                 s_liquidStyle = true;

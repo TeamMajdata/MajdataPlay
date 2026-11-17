@@ -189,8 +189,9 @@ dimensions, and the later capture does not overwrite the earlier result's mappin
 
 The first copy/downsample selects `_MajUiCaptureClipUvX/Y` for the current cut,
 writes coverage to Alpha and multiplies RGB by it; Gaussian H/V filter that
-premultiplied RGBA together. Board/RT1 disables this capture encoding and retains
-its prior behavior. Scene output and both mask layers are unchanged.
+premultiplied RGBA together. Only the Login window opts into this encoding for
+liquid RT1; other boards retain their original sampling. Scene output and both
+mask layers are unchanged.
 
 All RT2 consumers, including native controls such as Setting's dark value plate,
 use the Category slot; sharing that source does not require the `IsCategory`
@@ -198,8 +199,8 @@ visual-role flag. RT3 safe sampling applies to actual peripheral keys and the
 explicit Liquid List cover overlays;
 Setting adjustment capsules share RT3 but are not `IsButton` keys and retain
 their previous sampling. The affected consumers radially limit refracted lookup
-positions outside their source's CPU-precomputed safe circle before the existing
-single RGBA read. Bounds include the projected center and a conservative
+positions outside their source's CPU-precomputed safe circle before sampling.
+Bounds include the projected center and a conservative
 two-texel inset. Dividing RGB by filtered Alpha reconstructs valid scene color;
 Alpha is a filtering weight, not another material opacity or color switch.
 There is no three-pixel artwork-color transition or exterior surface replacement.
@@ -252,19 +253,21 @@ and `GetGaussianResolutionSize` compute them without a long-edge cap. The six
 role-named textures and three independent cuts remain; actual texel sizes are
 published. `Configure(enabled, style = GaussianBlur)` remains the single entry.
 
-Fixed sigma 4 / radius 8 gives 17 logical taps and nine paired bilinear reads per
-axis. Downsample plus H/V totals 4+9+9=22 sampling calls over equal quarter output
-areas across three passes, not 22 reads in one pixel invocation or a bandwidth
+Fixed sigma 3 / radius 6 gives 13 logical taps and seven paired bilinear reads per
+axis. Downsample plus H/V totals 4+7+7=18 sampling calls over equal quarter output
+areas across three passes, not 18 reads in one pixel invocation or a bandwidth
 count. GL Point-source reconstruction can expand the downsample calls; H/V use
-owned Bilinear inputs. Pure-math `BuildPanelBlurKernel()` precomputes four shared
-axis pairs and center weight once during type initialization. Resize/reset does
-not rebuild or clear that CPU kernel; release clears GPU bindings. The shader
-uses `_MajUiGaussianCenterWeight` and `_MajUiGaussianPairs[4]`, with four pairs
-unrolled. Old half-grid sigma 8 / radius 16, 17 reads/axis and the size-dependent
-kernel/1024 reference cap are historical. Quarter sigma 4 suggests roughly the
-same 16 source-pixel continuous sigma as half sigma 8, but downsample/reconstruction
-can alter detail and PSF. This requested revision is untested; the user will
-review its appearance. Neither image equivalence nor measured FPS gain is claimed.
+owned Bilinear inputs. Pure-math `BuildPanelBlurKernel()` precomputes three shared
+axis pairs and center weight once during type initialization. The capture material
+binds them once when created; resizing only changes the sampling step. The shader
+uses `_MajUiGaussianCenterWeight` and `_MajUiGaussianPairs[3]`, with three pairs
+unrolled. The preceding quarter-grid sigma 4 / radius 8 used nine reads per axis;
+this revision only reduces the kernel, retaining every target size and capture
+stage. Old half-grid sigma 8 / radius 16, 17 reads/axis and the size-dependent
+kernel/1024 reference cap are historical. Quarter sigma 3 suggests roughly a
+12 source-pixel continuous sigma, but downsample/reconstruction can alter detail
+and PSF. The user will review its appearance. Neither image equivalence nor
+measured FPS gain is claimed.
 Liquid RT2/RT3 each perform one bilinear prefix Blit into an independent
 ceil-half target and expose Bilinear/Clamp snapshots to the existing glass shader.
 A borrowed Point-filtered source is
@@ -323,7 +326,15 @@ This exact native-contour path is not a generic analytic fallback: missing Sprit
 maps, unknown procedural shapes and unsupported formats/profiles still disable
 refraction. GPU, visual and device validation of this fix is recorded separately.
 
-### Peripheral center falloff, 2026-11-12
+### Peripheral lens lighting and refraction
+
+Only the physical outer keys use the radial lens treatment. Liquid glass caps
+their tint filter at 0.72 and solid artwork share at 0.18 to let more of RT3
+through. The soft white rim and progressively darker body follow the authored
+circle, so the visible arc keeps its shape even where the main display crops
+the button. Lighting leaves original coverage, icon and dashed ink intact and
+uses the existing contour and backdrop samples. Gaussian and the small native
+controls that also read RT3 keep their own recipes.
 
 Only `UiBackdropPanel.IsButton` sets `_LiquidRefractionTail` to 0.22. Sharing the
 Peripheral/RT3 source alone does not enable it: native category controls, Setting

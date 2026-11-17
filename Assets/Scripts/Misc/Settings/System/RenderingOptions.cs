@@ -79,8 +79,8 @@ namespace MajdataPlay.Settings
             }
         }
 
-        [Step("1")]
-        [Range("-1", null)]
+        [Step("30")]
+        [Range("30", null)]
         [OptionEnumerator(typeof(EngineNumberSettingEnumerator))]
         public int FPSLimit
         {

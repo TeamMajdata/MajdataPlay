@@ -33,11 +33,9 @@ Material:
     - _Frame: 1
     - _Radius: 0.45
     - _BevelWidth: 0.075
-    - _HighlightWidth: 0.0065753425
     - _HighlightStrength: 0.99
     - _Refraction: 0.012
     - _Transmission: 0.75
-    - _OutlineWidth: 0
     - _ShadowSoftness: 0.018
     - _StencilComp: 8
     - _Stencil: 0
@@ -49,7 +47,6 @@ Material:
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _ShapeUvTransform: {r: 1, g: 1, b: 0, a: 0}
-    - _OutlineColor: {r: 0, g: 0, b: 0, a: 1}
     - _ShadowColor: {r: 0, g: 0, b: 0, a: 0.24}
     - _ShadowOffset: {r: -0.004, g: 0.008, b: 0, a: 0}
   m_BuildTextureStacks: []

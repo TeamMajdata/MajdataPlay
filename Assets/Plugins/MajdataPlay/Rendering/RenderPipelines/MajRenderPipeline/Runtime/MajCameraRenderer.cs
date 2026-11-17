@@ -71,6 +71,9 @@ namespace MajdataPlay.Rendering
         /// <summary>Retains the backdrop consumer prepared before the current camera's geometry is culled.</summary>
         private IMajUiBackdropCapture? _uiBackdropCapture;
 
+        /// <summary>Retains the first capture cut only when the current camera requires a board source.</summary>
+        private IMajUiBackdropCapture? _uiBoardBackdropCapture;
+
         /// <summary>Retains an optional second backdrop stage requested before the current camera's culling.</summary>
         private IMajUiButtonBackdropCapture? _uiButtonBackdropCapture;
 
@@ -152,6 +155,7 @@ namespace MajdataPlay.Rendering
                         _usingSceneAttachments = false;
                         _captureActions = Array.Empty<Action<RenderTargetIdentifier, CommandBuffer>>();
                         _uiBackdropCapture = null;
+                        _uiBoardBackdropCapture = null;
                         _uiButtonBackdropCapture = null;
                         _uiCategoryBackdropCapture = null;
                         _usingBackdropNativePass = false;
@@ -188,6 +192,7 @@ namespace MajdataPlay.Rendering
             bool forceIntermediateOutput)
         {
             _uiBackdropCapture = MajUiBackdropBridge.GetActive(_camera);
+            _uiBoardBackdropCapture = MajUiBackdropBridge.GetActiveBoard(_uiBackdropCapture, _camera);
             _uiButtonBackdropCapture = MajUiBackdropBridge.GetActiveButtons(_uiBackdropCapture, _camera);
             _uiCategoryBackdropCapture = MajUiBackdropBridge.GetActiveCategories(_uiBackdropCapture, _camera);
             PrepareGeometry();
@@ -201,6 +206,7 @@ namespace MajdataPlay.Rendering
             if (!canUseIntermediate)
             {
                 _uiBackdropCapture = null;
+                _uiBoardBackdropCapture = null;
                 _uiButtonBackdropCapture = null;
                 _uiCategoryBackdropCapture = null;
             }
@@ -717,6 +723,10 @@ namespace MajdataPlay.Rendering
 
         private void RecordGeometry(bool useDynamicBatching, bool useGPUInstancing)
         {
+            if (_uiBackdropCapture != null && _usingSceneAttachments)
+            {
+                MajUiBackdropBridge.BeginCamera(_uiBackdropCapture, _buffer, _camera);
+            }
             DrawGeometry(RenderQueueRange.opaque, SortingCriteria.CommonOpaque,
                 useDynamicBatching, useGPUInstancing, "MRP.Opaque");
             if (_camera.clearFlags == CameraClearFlags.Skybox)
@@ -735,7 +745,10 @@ namespace MajdataPlay.Rendering
                 };
                 DrawGeometry(backgroundQueues, SortingCriteria.CommonTransparent,
                     useDynamicBatching, useGPUInstancing, "MRP.BackgroundUI");
-                RecordUiBackdrop(UiBackdropStage.Board);
+                if (_uiBoardBackdropCapture != null)
+                {
+                    RecordUiBackdrop(UiBackdropStage.Board);
+                }
                 // The first source contains the PV/background only. Live2D and other camera
                 // extensions render afterwards and cannot leak into the board's glass background.
                 DrawCameraExtension();
@@ -841,7 +854,7 @@ namespace MajdataPlay.Rendering
                 }
                 else
                 {
-                    _uiBackdropCapture!.Record(_buffer, _camera, _attachments.ResolvedColor);
+                    _uiBoardBackdropCapture!.Record(_buffer, _camera, _attachments.ResolvedColor);
                 }
             }
             catch (Exception exception)
@@ -1059,6 +1072,7 @@ namespace MajdataPlay.Rendering
             _cameraExtension?.Dispose();
             _cameraExtension = null;
             _uiBackdropCapture = null;
+            _uiBoardBackdropCapture = null;
             _uiButtonBackdropCapture = null;
             _uiCategoryBackdropCapture = null;
             _backdropAttachmentCamera = null;

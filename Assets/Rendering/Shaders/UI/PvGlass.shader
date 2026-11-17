@@ -47,6 +47,7 @@ Shader "Maj/UI/PV Glass"
         [HideInInspector] _BackdropIsCategory ("Use First Control Snapshot", Float) = 0
         [HideInInspector] _BackdropIsNativeControl ("Preserve Native Control Artwork Edges", Float) = 0
         [HideInInspector] _BackdropUsesPanelBlur ("Use Scene-Prefix Board Backdrop", Float) = 0
+        [HideInInspector] _BackdropIsPanel ("Use Large Plate Surface Treatment", Float) = 0
         [HideInInspector] _BackdropIsRoundedRect ("Use Authored Procedural Corners", Float) = 0
         [HideInInspector] _RadiusTL ("Top Left Radius", Float) = 0
         [HideInInspector] _RadiusTR ("Top Right Radius", Float) = 0
@@ -134,6 +135,7 @@ Shader "Maj/UI/PV Glass"
             #include "UnityCG.cginc"
             #include "UnityUI.cginc"
             #include "Assets/Plugins/MajdataPlay/Rendering/RenderPipelines/MajRenderPipeline/Library/MajMipSampling.hlsl"
+            #include "Assets/Rendering/Shaders/UI/GlassSurfaceLighting.hlsl"
 
             struct Attributes
             {
@@ -158,7 +160,8 @@ Shader "Maj/UI/PV Glass"
                 half3 inverseFillColor : TEXCOORD6;
                 half3 inverseRemainingFillColor : TEXCOORD7;
                 #ifdef MAJ_UI_LIQUID_GLASS
-                half3 sourceTint : TEXCOORD8;
+                // RGB is the inherited artwork tint; W controls the authored material's volume gradient.
+                half4 liquidTintAndMaterialDepth : TEXCOORD8;
                 #endif
                 UNITY_VERTEX_OUTPUT_STEREO
             };
@@ -181,6 +184,7 @@ Shader "Maj/UI/PV Glass"
             half _BackdropIsCategory;
             half _BackdropIsNativeControl;
             half _BackdropUsesPanelBlur;
+            half _BackdropIsPanel;
             float _BackdropIsRoundedRect;
             float _RadiusTL, _RadiusTR, _RadiusBL, _RadiusBR;
             float _GlassRefraction;
@@ -218,14 +222,13 @@ Shader "Maj/UI/PV Glass"
 
             // Globals deliberately stay outside Properties so per-panel materials never hide new PV frames.
             sampler2D _MajPvBlurTexture;
-            float4 _MajPvBlurTexture_TexelSize;
             float _MajPvBlurReady;
             sampler2D _MajUiPanelBlurTexture;
-            float4 _MajUiPanelBlurTexture_TexelSize;
             float _MajUiPanelBlurReady;
+            float _MajUiPanelCaptureHasCoverage;
             sampler2D _MajUiButtonBlurTexture;
-            float4 _MajUiButtonBlurTexture_TexelSize;
             float _MajUiButtonBlurReady;
+            float2 _MajUiButtonCaptureInvSize;
             // RT2 and RT3 retain independent circular coverage and sampling bounds.
             // Later button capture must not replace the category source's mapping.
             float4 _MajUiCategoryClipUvX;
@@ -233,7 +236,7 @@ Shader "Maj/UI/PV Glass"
             float4 _MajUiCategoryClipSampleBounds;
             float4 _MajUiButtonClipUvX;
             float4 _MajUiButtonClipUvY;
-            // Projected circle center and an inset radius keep the single background read valid.
+            // The projected circle and inset radius keep the background filter footprint valid.
             float4 _MajUiButtonClipSampleBounds;
             // Select one complete optical program so Gaussian draws do not reserve liquid state.
             #ifdef MAJ_UI_LIQUID_GLASS
@@ -298,41 +301,52 @@ Shader "Maj/UI/PV Glass"
                 output.inverseFillColor = rcp(max(fill, 0.0001));
                 output.inverseRemainingFillColor = rcp(max(1 - fill, 0.0001));
                 #ifdef MAJ_UI_LIQUID_GLASS
-                output.sourceTint = 1;
+                half3 sourceTint = 1;
                 if (MAJ_UI_LIQUID_STYLE > 0.5 && _LiquidTintSourceColor.a > 0)
                 {
                     // Sample source artwork per vertex, never the already tinted scene or a CPU readback.
                     // Use the same working-space multiplier as ordinary UI; no yellow palette is baked in.
                     half3 sourceFill = tex2Dlod(_LiquidTintSourceTex, float4(_LiquidTintSourceUV.xy, 0, 0)).rgb;
-                    output.sourceTint = lerp(half3(1, 1, 1), sourceFill * _LiquidTintSourceColor.rgb,
+                    sourceTint = lerp(half3(1, 1, 1), sourceFill * _LiquidTintSourceColor.rgb,
                         _LiquidTintSourceColor.a);
                 }
+                // Reuse the sampled fill and existing varying; the PV never selects the material treatment.
+                output.liquidTintAndMaterialDepth = half4(sourceTint,
+                    MajGlassMaterialDepth(fill * output.color.rgb * sourceTint));
                 #endif
                 return output;
             }
 
-            half4 SampleBackdropTap(float2 uv)
+            half4 SampleBackdrop(float2 uv)
             {
-                half4 result;
+                uv = saturate(uv);
                 UNITY_BRANCH
                 if (_BackdropUsesPanelBlur > 0.5h)
                 {
-                    result = tex2D(_MajUiPanelBlurTexture, saturate(uv));
+                    return tex2D(_MajUiPanelBlurTexture, uv);
                 }
-                else
+                UNITY_BRANCH
+                if (_BackdropIsButton > 0.5h)
                 {
-                    UNITY_BRANCH
-                    if (_BackdropIsButton > 0.5h)
-                    {
-                        result = tex2D(_MajUiButtonBlurTexture, saturate(uv));
-                    }
-                    else
-                    {
-                        result = tex2D(_MajPvBlurTexture, saturate(uv));
-                    }
+                    return tex2D(_MajUiButtonBlurTexture, uv);
                 }
-                return result;
+                return tex2D(_MajPvBlurTexture, uv);
             }
+
+            #ifdef MAJ_UI_LIQUID_GLASS
+            half4 SamplePeripheralBackdrop(float2 uv)
+            {
+                // Soften narrow UI lines in the key's transmission without blurring the
+                // shared prefix or moving the refracted center. Keep the center tap
+                // stronger than either side so a thin shadow cannot split in two.
+                float2 offset = _MajUiButtonCaptureInvSize;
+                half4 center = tex2Dlod(_MajUiButtonBlurTexture, float4(uv, 0, 0));
+                return center * 0.4h + (tex2Dlod(_MajUiButtonBlurTexture, float4(uv - offset, 0, 0))
+                    + tex2Dlod(_MajUiButtonBlurTexture, float4(uv + offset, 0, 0))
+                    + tex2Dlod(_MajUiButtonBlurTexture, float4(uv + float2(-offset.x, offset.y), 0, 0))
+                    + tex2Dlod(_MajUiButtonBlurTexture, float4(uv + float2(offset.x, -offset.y), 0, 0))) * 0.15h;
+            }
+            #endif
             float SampleLiquidContour(float2 uv)
             {
                 float4 encoded;
@@ -403,15 +417,11 @@ Shader "Maj/UI/PV Glass"
                 input.color.a = round(input.color.a * alphaPrecision) / alphaPrecision;
 
                 half4 artwork = MAJ_SAMPLE_TEX2D(_MainTex, input.texcoord) + _TextureSampleAdd;
-                half ready = lerp(_MajPvBlurReady, _MajUiButtonBlurReady, _BackdropIsButton);
-                if (_BackdropIsCategory > 0.5h)
-                {
-                    ready = _MajPvBlurReady;
-                }
-                if (_BackdropUsesPanelBlur > 0.5h)
-                {
-                    ready = _MajUiPanelBlurReady;
-                }
+                bool usesPanelCapture = _BackdropUsesPanelBlur > 0.5h;
+                bool usesButtonCapture = _BackdropIsButton > 0.5h;
+                bool isPeripheralLens = usesButtonCapture && _BackdropIsNativeControl < 0.5h;
+                half ready = usesPanelCapture ? _MajUiPanelBlurReady
+                    : usesButtonCapture ? _MajUiButtonBlurReady : _MajPvBlurReady;
                 bool liquidEnabled = false;
                 #ifdef MAJ_UI_LIQUID_GLASS
                 bool nativeLiquidContour = _LiquidNativeContourReady > 0.5 && _BackdropIsRoundedRect > 0.5;
@@ -456,9 +466,8 @@ Shader "Maj/UI/PV Glass"
                 }
                 float2 liquidNormal = 0;
                 float liquidUnitsPerPixel = 1;
-                float liquidTailRemaining = 0;
+                float liquidSurfaceDepth = 0;
                 half liquidBodyCoverage = 1;
-                half liquidEdgeBand = 0;
                 #ifdef MAJ_UI_LIQUID_GLASS
                 UNITY_BRANCH
                 if (liquidEnabled && nativeLiquidContour)
@@ -468,6 +477,7 @@ Shader "Maj/UI/PV Glass"
                     // or texture read. The existing roundedCoverage clips the edge exactly once.
                     liquidUnitsPerPixel = max(roundedUnitsPerPixel, 1e-5);
                     liquidNormal = roundedGradient / liquidUnitsPerPixel;
+                    liquidSurfaceDepth = max(-distance, 0) / shortHalfSize;
                 }
                 else if (liquidEnabled)
                 {
@@ -483,14 +493,10 @@ Shader "Maj/UI/PV Glass"
                     {
                         sourceDistance = GlassCropDistance(sourceDistance, abs(bodyPosition.y) - _LiquidGlassSpriteRect.w);
                     }
-                    UNITY_BRANCH
-                    if (_LiquidRefractionTail > 0)
-                    {
-                        // Normalize against the authored body, excluding Sprite padding and
-                        // shadows. The UI rectangle can be larger than the visible lens.
-                        float bodyRadius = max(min(_LiquidGlassSpriteRect.z, _LiquidGlassSpriteRect.w), 1e-4);
-                        liquidTailRemaining = 1 - saturate(max(-sourceDistance, 0) / bodyRadius);
-                    }
+                    // A value-based depth remains continuous where the contour's normal changes direction.
+                    // Optical derivative conversion below is only for refraction and the narrow rim.
+                    liquidSurfaceDepth = max(-sourceDistance, 0)
+                        / max(min(_LiquidGlassSpriteRect.z, _LiquidGlassSpriteRect.w), 1e-4);
                     float2 sourceGradient = float2(ddx(sourceDistance), ddy(sourceDistance));
                     float sourceRate = max(length(sourceGradient), 1e-5);
                     liquidNormal = sourceGradient / sourceRate;
@@ -531,48 +537,43 @@ Shader "Maj/UI/PV Glass"
                     rim = (1 - smoothstep(0, bevelWidth * 0.18, abs(distance))) * shapeEnabled;
                 }
                 float2 pvUV = input.pvUV.xy / input.pvUV.w;
-                bool usesCategoryCapture = _BackdropUsesPanelBlur < 0.5h && _BackdropIsButton < 0.5h;
+                bool usesCategoryCapture = !usesPanelCapture && !usesButtonCapture;
                 float4 captureClipUvX = usesCategoryCapture ? _MajUiCategoryClipUvX : _MajUiButtonClipUvX;
                 float4 captureClipUvY = usesCategoryCapture ? _MajUiCategoryClipUvY : _MajUiButtonClipUvY;
                 float4 captureSampleBounds = usesCategoryCapture
                     ? _MajUiCategoryClipSampleBounds : _MajUiButtonClipSampleBounds;
-                bool clipsBackdropCapture = (usesCategoryCapture ||
-                    (_BackdropIsButton > 0.5h && _BackdropIsNativeControl < 0.5h)) && captureClipUvX.w > 0.5;
-                float2 captureDx = 0;
-                float2 captureDy = 0;
+                bool clipsBackdropCapture = (usesCategoryCapture || isPeripheralLens) && captureClipUvX.w > 0.5;
                 #ifdef MAJ_UI_LIQUID_GLASS
                 UNITY_BRANCH
                 if (liquidEnabled)
                 {
-                    captureDx = ddx(pvUV);
-                    captureDy = ddy(pvUV);
+                    float2 captureDx = ddx(pvUV);
+                    float2 captureDy = ddy(pvUV);
                     float bandWidth = max(_LiquidGlassOptics.x, 1e-4);
-                    float t = saturate(max(-distance, 0) / bandWidth);
-                    float strength = saturate(_GlassRefraction / 0.008);
+                    float capDepth = saturate(max(-distance, 0) / bandWidth);
+                    float refractionStrength = saturate(_GlassRefraction / 0.008);
                     float normalizedDisplacement = 0;
                     // Only the matching baked response is used. Missing profiles never run Snell math.
                     UNITY_BRANCH
-                    if (t < 1)
+                    if (capDepth < 1)
                     {
-                        float2 response = tex2Dlod(_LiquidProfileTex,
-                            float4(t * _LiquidProfileUV.x + _LiquidProfileUV.y, 0.5, 0, 0)).rg;
-                        normalizedDisplacement = response.x;
-                        liquidEdgeBand = response.y * strength;
+                        normalizedDisplacement = tex2Dlod(_LiquidProfileTex,
+                            float4(capDepth * _LiquidProfileUV.x + _LiquidProfileUV.y, 0.5, 0, 0)).r;
                     }
                     UNITY_BRANCH
                     if (_LiquidRefractionTail > 0)
                     {
                         // Continue the peripheral lens through the body, rather than ending at
                         // the narrow reflection band. Both the center offset and its slope vanish.
-                        float onset = t * t * t * (10 + t * (-15 + 6 * t));
+                        float onset = capDepth * capDepth * capDepth * (10 + capDepth * (-15 + 6 * capDepth));
+                        float remainingRadius = 1 - saturate(liquidSurfaceDepth);
                         // The fixed cubic-cap/Snell LUT peaks at this normalized displacement.
                         // Use only its remaining headroom: retain the existing strongest bend.
                         float headroom = 1 - saturate(normalizedDisplacement / 0.397008);
-                        normalizedDisplacement += _LiquidRefractionTail * onset * liquidTailRemaining * liquidTailRemaining * headroom;
+                        normalizedDisplacement += _LiquidRefractionTail * onset * remainingRadius * remainingRadius * headroom;
                     }
-                    float displacement = normalizedDisplacement * bandWidth * strength;
-                    displacement /= liquidUnitsPerPixel;
-                    pvUV -= (captureDx * liquidNormal.x + captureDy * liquidNormal.y) * displacement;
+                    float displacementPixels = normalizedDisplacement * bandWidth * refractionStrength / liquidUnitsPerPixel;
+                    pvUV -= (captureDx * liquidNormal.x + captureDy * liquidNormal.y) * displacementPixels;
                 }
                 #endif
                 half4 color;
@@ -586,10 +587,6 @@ Shader "Maj/UI/PV Glass"
                 else
                 {
                     half4 baseArtwork = MAJ_SAMPLE_TEX2D(_PanelBaseTex, input.texcoord);
-                    half liquidReflectionDirection = 0;
-                    half liquidInnerShade = 0;
-                    bool liquidFineRimActive = false;
-                    float liquidFineVariance = 1;
                     // Authored fill alpha describes the shape, not glass translucency: a 0.5 fill
                     // becomes full RT coverage, while its 0.5-to-zero feather becomes one-to-zero.
                     half coverage = saturate(baseArtwork.a / _FillAlpha) * roundedCoverage;
@@ -612,40 +609,65 @@ Shader "Maj/UI/PV Glass"
                                 + (pvUV - captureSampleBounds.xy) * radialScale;
                         }
                     }
-                    // Both styles consume one prefiltered source; categories no longer repeat a nine-tap blur per pixel.
-                    half4 captured = SampleBackdropTap(pvUV);
-                    half3 backdrop = captured.rgb;
+                    half4 captured;
+                    #ifdef MAJ_UI_LIQUID_GLASS
                     UNITY_BRANCH
-                    if (clipsBackdropCapture)
+                    if (isPeripheralLens && liquidEnabled && coverage > 0)
+                    {
+                        captured = SamplePeripheralBackdrop(pvUV);
+                    }
+                    else
+                    #endif
+                    {
+                        captured = SampleBackdrop(pvUV);
+                    }
+                    half3 backdrop = captured.rgb;
+                    bool hasBoardCoverage = MAJ_UI_LIQUID_STYLE > 0.5 && usesPanelCapture
+                        && _MajUiPanelCaptureHasCoverage > 0.5;
+                    UNITY_BRANCH
+                    if (clipsBackdropCapture || hasBoardCoverage)
                     {
                         // Unpremultiply the filtered valid scene, so Gaussian filtering does not
                         // spread the opaque black mask inward. Genuine black scene pixels stay black.
                         backdrop = saturate(backdrop / max(captured.a, 1.0h / 255.0h));
                     }
-                    half3 reflectedBackground = backdrop;
                     // Tint strength changes the RGB multiplier, not the coverage or original artwork palette.
                     // Gaussian buttons share liquid glass's texture-derived transmission and artwork share.
-                    bool useGlassColor = MAJ_UI_LIQUID_STYLE > 0.5 || _BackdropIsButton > 0.5h || _BackdropIsCategory > 0.5h
+                    bool useGlassColor = MAJ_UI_LIQUID_STYLE > 0.5 || usesButtonCapture || _BackdropIsCategory > 0.5h
                         || _BackdropIsNativeControl > 0.5h;
-                    half3 authoredFilter = input.fillColor * input.color.rgb;
+                    half3 authoredColor = input.fillColor * input.color.rgb;
+                    half3 authoredFilter = authoredColor;
+                    half artworkShare = _LiquidArtworkBlend;
                     if (useGlassColor)
                     {
-                        half transmissionStrength = _LiquidTintStrength;
-                        if (MAJ_UI_LIQUID_STYLE < 0.5 && _BackdropIsButton > 0.5h)
+                        half tintStrength = _LiquidTintStrength;
+                        if (MAJ_UI_LIQUID_STYLE < 0.5 && usesButtonCapture)
                         {
-                            // Strong Gaussian filtering gathers dark exterior pixels around the ring.
-                            // Reduce absorption only here; liquid and non-peripheral recipes stay intact.
-                            transmissionStrength = min(transmissionStrength, _GaussianButtonTintStrength);
+                            // Match the lighter appearance of the Gaussian button recipe.
+                            tintStrength = min(tintStrength, _GaussianButtonTintStrength);
                         }
                         #ifdef MAJ_UI_LIQUID_GLASS
-                        authoredFilter = lerp(half3(1, 1, 1), authoredFilter, transmissionStrength) * input.sourceTint;
+                        if (MAJ_UI_LIQUID_STYLE > 0.5 && _BackdropIsPanel > 0.5h)
+                        {
+                            // Keep 85% transmission, with a softer authored filter to avoid over-tinting.
+                            // The remaining 15% retains the complete authored color, including inherited tint.
+                            authoredColor *= input.liquidTintAndMaterialDepth.rgb;
+                            authoredFilter = lerp(half3(1, 1, 1), authoredColor, 0.65h);
+                            artworkShare = 0.15h;
+                        }
+                        else
+                        {
+                            if (MAJ_UI_LIQUID_STYLE > 0.5 && isPeripheralLens)
+                            {
+                                tintStrength = min(tintStrength, 0.72h);
+                                artworkShare = min(artworkShare, 0.18h);
+                            }
+                            authoredFilter = lerp(half3(1, 1, 1), authoredFilter, tintStrength)
+                                * input.liquidTintAndMaterialDepth.rgb;
+                        }
                         #else
-                        authoredFilter = lerp(half3(1, 1, 1), authoredFilter, transmissionStrength);
+                        authoredFilter = lerp(half3(1, 1, 1), authoredFilter, tintStrength);
                         #endif
-                        // A less absorptive curved surface reveals the refracted background color.
-                        // The flat center keeps the configured texture-derived multiplier.
-                        authoredFilter = lerp(authoredFilter, half3(1, 1, 1),
-                            0.36h * liquidEdgeBand);
                         backdrop *= authoredFilter;
                     }
                     else
@@ -653,58 +675,7 @@ Shader "Maj/UI/PV Glass"
                         half3 colorFilter = lerp(half3(1, 1, 1), authoredFilter, _TintStrength);
                         backdrop = (backdrop * (1 - _FrostStrength) + _FrostStrength) * colorFilter;
                     }
-                    // A restrained directional rim and opposing dark bevel suggest thickness without
-                    // normal textures, additional PV reads, chromatic noise, or another render pass.
-                    if (liquidEnabled)
-                    {
-                        // Reflection width remains continuous. Filter the subtle inner lip here;
-                        // reflection coverage is integrated after the nonlinear Max comparison below.
-                        if (_LiquidGlassOptics.z > 0)
-                        {
-                            float width = _LiquidGlassOptics.z;
-                            float sigma = max(_LiquidGlassOptics.w, width * 0.35);
-                            float variance = max(sigma * sigma
-                                + liquidUnitsPerPixel * liquidUnitsPerPixel / 12, 1e-8);
-                            float inside = max(-distance, 0);
-                            float sigmaAA = sqrt(variance);
-                            float inner = inside - (width + 2 * sigmaAA);
-                            bool innerActive = abs(inner) <= 6 * sigmaAA;
-                            float fineSigma = 0.5 * sigma;
-                            liquidFineVariance = max(fineSigma * fineSigma, 1e-8);
-                            // Each footprint offset is at most sqrt(2)/4 pixels. This slightly wider
-                            // bound retains every sample within six sigma without evaluating its exp2.
-                            liquidFineRimActive = abs(distance) <= 6 * max(fineSigma, 0.0001)
-                                + 0.36 * liquidUnitsPerPixel;
-                            UNITY_BRANCH
-                            if (liquidEdgeBand > 0 || liquidFineRimActive || innerActive)
-                            {
-                                float2 backdropTexelSize = _BackdropUsesPanelBlur > 0.5h
-                                    ? _MajUiPanelBlurTexture_TexelSize.xy : _BackdropIsButton > 0.5h
-                                    ? _MajUiButtonBlurTexture_TexelSize.xy : _MajPvBlurTexture_TexelSize.xy;
-                                float2 imageNormal = (captureDx * liquidNormal.x + captureDy * liquidNormal.y)
-                                    / max(abs(backdropTexelSize), 1e-6);
-                                float2 screenNormal = imageNormal * rsqrt(max(dot(imageNormal, imageNormal), 1e-8));
-                                half light = saturate(dot(screenNormal, float2(-0.6, 0.8)) * 0.5 + 0.5);
-                                liquidReflectionDirection = 0.3h + 0.7h * light * light;
-                                UNITY_BRANCH
-                                if (innerActive)
-                                {
-                                    // The omitted six-sigma tail is below 1e-9 RGB; the authored lip stays unchanged.
-                                    half secondary = (1 - light) * (1 - light);
-                                    float integratedCoverage = sigma * rsqrt(variance);
-                                    liquidInnerShade = exp2(-0.72134752 * inner * inner / variance)
-                                        * integratedCoverage * (0.02h + 0.04h * secondary);
-                                }
-                            }
-                        }
-                        // Shade the transmitted background before reconstructing foreground ink.
-                        // Reusing this read adds no texture taps and leaves dark glyphs/dashes intact.
-                        half angularReflection = 0.36h * liquidEdgeBand * liquidEdgeBand;
-                        half3 reflectedColor = saturate(reflectedBackground * 1.12h);
-                        backdrop = lerp(backdrop, max(backdrop, reflectedColor),
-                            angularReflection * liquidReflectionDirection);
-                    }
-                    else if (MAJ_UI_LIQUID_STYLE <= 0.5 && _BackdropIsNativeControl < 0.5h)
+                    if (MAJ_UI_LIQUID_STYLE <= 0.5 && _BackdropIsNativeControl < 0.5h)
                     {
                         half lighting = dot(normal, float2(-0.6, -0.8));
                         half highlight = _GlassHighlight * (rim * (0.45h + 0.55h * max(lighting, 0))
@@ -714,10 +685,23 @@ Shader "Maj/UI/PV Glass"
                     }
                     if (useGlassColor)
                     {
-                        // The original artwork supplies the additive share; its palette also filters
-                        // transmission. Keep the same proportions in both styles without changing coverage.
-                        backdrop = lerp(backdrop, input.fillColor * input.color.rgb, _LiquidArtworkBlend);
+                        // Artwork tint changes RGB only; original coverage and foreground ink are separate.
+                        backdrop = lerp(backdrop, authoredColor, artworkShare);
                     }
+
+                    #ifdef MAJ_UI_LIQUID_GLASS
+                    if (liquidEnabled)
+                    {
+                        float height = input.glassLocal.y / max(_LiquidGlassRect.w, 1e-4);
+                        float reflectionWidth = max(_LiquidGlassOptics.z, _LiquidGlassOptics.w * 1.7);
+                        // One surface treatment replaces the old black outline, inset groove and angular Max light.
+                        // Apply it before ink reconstruction so original dashes and symbols remain clear.
+                        backdrop = MajApplyGlassSurfaceLighting(backdrop, -distance,
+                            liquidNormal * liquidUnitsPerPixel, liquidSurfaceDepth, height,
+                            reflectionWidth, input.liquidTintAndMaterialDepth.w, max(_GlassHighlight / 0.045h, 0),
+                            _BackdropIsPanel > 0.5h, isPeripheralLens);
+                    }
+                    #endif
 
                     // Unmatte against the same sampled fill, rather than guessing a white-pixel mask.
                     // This retains the orange dashed decoration even when the moving PV is nearly black.
@@ -727,35 +711,10 @@ Shader "Maj/UI/PV Glass"
                     half inkAlpha = saturate(max(difference.r, max(difference.g, difference.b)));
                     half3 inkPremultiplied = max(artwork.rgb - input.fillColor * (1 - inkAlpha), 0);
                     half3 surface = backdrop * (1 - inkAlpha) + inkPremultiplied * input.color.rgb;
-                    // Resolve the edge target over the finished, texture-tinted artwork. Keep
-                    // neutral light independent of the authored RGB and preserve the UI alpha blend.
                     if (liquidEnabled)
                     {
-                        half3 shadedSurface = surface * (1 - saturate(liquidInnerShade));
-                        // Finish transmission/body masking before lighting the edge. Applying this
-                        // coverage again after the rim would dim and move the apparent reflection inward.
-                        shadedSurface = lerp(artwork.rgb * input.color.rgb, shadedSurface, liquidBodyCoverage);
-                        surface = saturate(shadedSurface);
-                        UNITY_BRANCH
-                        if (liquidFineRimActive)
-                        {
-                            half headroom = saturate(1 - max(shadedSurface.r, max(shadedSurface.g, shadedSurface.b)));
-                            // A fixed thin profile retains the List reference width. Brightness controls
-                            // the available neutral light, never a threshold that erases bright buttons.
-                            // Four footprint samples retain subpixel AA without a one-pixel minimum.
-                            float delta = -distance;
-                            float2 footprint = 0.25 * liquidUnitsPerPixel
-                                * float2(liquidNormal.x + liquidNormal.y, liquidNormal.x - liquidNormal.y);
-                            float4 sampleDelta = delta + float4(footprint.x, -footprint.x, footprint.y, -footprint.y);
-                            float4 profile = exp2(-0.72134752 * sampleDelta * sampleDelta / liquidFineVariance);
-                            half gain = 1.6h * max(_GlassHighlight / 0.045h, 0);
-                            float4 reflected = min(headroom, headroom * profile * gain);
-                            half fineDirection = min(1.0h, liquidReflectionDirection * 1.2h);
-                            half reflection = dot(reflected, float4(0.25, 0.25, 0.25, 0.25)) * fineDirection;
-                            half3 edgeTarget = shadedSurface + reflection;
-                            // Neutral Max light is applied last; original PNG coverage below clips it once.
-                            surface = saturate(max(shadedSurface, edgeTarget));
-                        }
+                        // Preserve the original body boundary and foreground artwork; lighting never supplies alpha.
+                        surface = saturate(lerp(artwork.rgb * input.color.rgb, surface, liquidBodyCoverage));
                     }
 
                     else if (MAJ_UI_LIQUID_STYLE > 0.5)

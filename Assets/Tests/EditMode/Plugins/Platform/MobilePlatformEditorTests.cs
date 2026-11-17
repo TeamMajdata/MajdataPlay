@@ -57,6 +57,8 @@ namespace MajdataPlay.Tests.Plugins.Platform
             Assert.That(AndroidRuntime.TargetSdkVersion, Is.EqualTo(0));
             Assert.That(AndroidRuntime.VersionCode, Is.EqualTo(0));
             Assert.That(() => _ = AndroidRuntime.CurrentActivity, Throws.Exception);
+            Assert.That(() => AndroidRuntime.SetFrameRate(60f), Throws.TypeOf<PlatformNotSupportedException>());
+            Assert.That(() => AndroidRuntime.SetFrameRate(float.NaN), Throws.TypeOf<ArgumentOutOfRangeException>());
         }
 
         /// <summary>Checks that activity results and new intents are forwarded to subscribers.</summary>

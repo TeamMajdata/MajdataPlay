@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace MajdataPlay.Settings.OptionEnumerators;
 public sealed class EngineNumberSettingEnumerator : DefaultNumberEnumerator, IOptionEnumerator
@@ -15,10 +15,7 @@ public sealed class EngineNumberSettingEnumerator : DefaultNumberEnumerator, IOp
         switch (Name)
         {
             case "FPSLimit":
-                Application.targetFrameRate = (int)CurrentValue;
-#if UNITY_ANDROID && !UNITY_EDITOR
-                MajdataPlay.Platform.Android.AndroidRuntime.RequestXiaomiRefreshRate(Application.targetFrameRate);
-#endif
+                GameManager.SetFrameRate((int)CurrentValue);
                 break;
         }
         _lastValue = (int)CurrentValue;

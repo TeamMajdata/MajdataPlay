@@ -48,6 +48,7 @@ namespace MajdataPlay.Editor
             "MAJTEXT_SCORE_SENDING",
             "MAJTEXT_LOADING_CHART",
             "MAJTEXT_WAITING_FOR_BACKGROUND_TASKS_SUSPEND",
+            "MAJTEXT_WAITING_FOR_RECORDER",
             "MAJTEXT_LOGGING_OUT",
             "MAJTEXT_LOADING_SCORE_STORAGE",
             "MAJTEXT_LOADING_SKIN",
@@ -78,6 +79,7 @@ namespace MajdataPlay.Editor
             "MAJTEXT_ERR_DOWNLOAD_FAILED",
             "MAJTEXT_ERR_LOAD_CHART_FAILED",
             "MAJTEXT_ERR_EMPTY_CHART",
+            "MAJTEXT_ERR_INVALID_SYNTAX",
             "MAJTEXT_ERR_SCAN_CHARTS_FAILED",
             "MAJTEXT_ERR_NO_CHART",
         };
