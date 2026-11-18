@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using MajdataPlay.Diagnostics;
 using MajdataPlay.i18n;
 using MajdataPlay.Tests;
 using NUnit.Framework;
@@ -72,6 +74,46 @@ namespace MajdataPlay.Tests.Game.Misc.i18n
             {
                 Assert.That(language.GetTranslations(), Is.Not.Empty, language.Code);
             }
+        }
+
+        /// <summary>
+        /// Checks that loading the bundled languages logs which files were scanned and which were loaded.
+        /// </summary>
+        /// <remarks>
+        /// The log is written through <see cref="MajDebug"/>, whose writer and minimum level are process-wide, so both are
+        /// saved and restored; the queue is drained before and after the test so only its own entries are asserted.
+        /// </remarks>
+        [Test]
+        public void Init_LogsScannedLanguageFiles()
+        {
+            var savedWriter = PrivateMember.GetStaticField<TextWriter?>(typeof(MajDebug), "s_logWriter");
+            var savedMinLevel = MajDebug.MinLogLevel;
+            var writer = new StringWriter();
+            try
+            {
+                MajDebug.SetLogWriter(new StringWriter(), false);
+                MajDebug.FlushLog();
+                MajDebug.MinLogLevel = LogLevel.Debug;
+                MajDebug.SetLogWriter(writer, false);
+
+                PrivateMember.SetStaticField(typeof(Localization), "_isInited", false);
+                PrivateMember.SetStaticProperty(typeof(Localization), nameof(Localization.Available), Array.Empty<Language>());
+
+                Localization.Init();
+                MajDebug.FlushLog();
+            }
+            finally
+            {
+                MajDebug.SetLogWriter(new StringWriter(), false);
+                MajDebug.FlushLog();
+                MajDebug.SetLogWriter(savedWriter, false);
+                MajDebug.MinLogLevel = savedMinLevel;
+            }
+
+            var text = writer.ToString();
+            Assert.That(text, Does.Contain("[I][Localization]Scanning 4 language files: Langs/en-US, Langs/ja-JP, Langs/zh-CN, Langs/zh-TW"));
+            Assert.That(text, Does.Contain("[D][Localization]Lang file loaded: Langs/en-US"));
+            Assert.That(text, Does.Contain("[I][Localization]Loaded 4 language files: en-US, ja-JP, zh-CN, zh-TW"));
         }
 
         /// <summary>Checks that the bundled languages translate the same keys as English.</summary>

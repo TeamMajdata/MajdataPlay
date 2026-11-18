@@ -68,29 +68,32 @@ namespace MajdataPlay.i18n
                     "Langs/zh-CN",
                     "Langs/zh-TW",
                 };
+                MajDebug.LogInfo(nameof(Localization), $"Scanning {files.Count} language files: {string.Join(", ", files)}");
                 List<Language> loadedLangs = new();
                 foreach (var file in files)
                 {
                     var ta = Resources.Load<TextAsset>(file);
                     if (ta == null)
                     {
-                        MajDebug.LogError($"Lang file not found: {file}");
+                        MajDebug.LogError(nameof(Localization), $"Lang file not found: {file}");
                         continue;
                     }
-                    MajDebug.LogDebug("Lang file loaded: " + file);
+                    MajDebug.LogDebug(nameof(Localization), $"Lang file loaded: {file}");
                     var json = ta.text;
                     var lang = Parse(json);
                     if (lang is null)
                     {
-                        MajDebug.LogError($"Failed to parse lang file: {file}");
+                        MajDebug.LogError(nameof(Localization), $"Failed to parse lang file: {file}");
                         continue;
                     }
                     loadedLangs.Add(lang);
                 }
                 if (loadedLangs.Count == 0)
                 {
+                    MajDebug.LogError(nameof(Localization), $"No language file could be loaded from: {string.Join(", ", files)}");
                     return;
                 }
+                MajDebug.LogInfo(nameof(Localization), $"Loaded {loadedLangs.Count} language files: {string.Join(", ", loadedLangs.Select(x => x.Code))}");
                 var grouped = loadedLangs.GroupBy(x => x.ToString());
                 Available = new Language[grouped.Count()];
                 foreach (var (i, grouping) in grouped.WithIndex())
@@ -100,7 +103,7 @@ namespace MajdataPlay.i18n
             }
             catch(Exception e)
             {
-                MajDebug.LogException(e);
+                MajDebug.LogException(nameof(Localization), e);
             }
         }
         /// <summary>
