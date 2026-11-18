@@ -15,6 +15,9 @@ namespace MajdataPlay
         const string NEW_VERSION_AVAILABLE_I18N_KEY = "MAJTEXT_NEW_VERSION_AVAILABLE";
         const float REFRESH_INTERVAL_SECONDS = 1f;
 
+        /// <summary>Places the diagnostics text after every scene UI material, including transition overlays (4000).</summary>
+        private const int FrontQueue = 4500;
+
         readonly FrameTimingDiagnostics _frameTimingDiagnostics = new();
         FPSMonitor _fpsMonitor = null!;
         TextMeshProUGUI _textDisplayer = null!;
@@ -32,6 +35,9 @@ namespace MajdataPlay
             Majdata<RuntimeInfoDisplayer>.SetAsSingleton(this);
             _fpsMonitor = GetComponent<FPSMonitor>();
             _textDisplayer = GetComponent<TextMeshProUGUI>();
+            // 诊断文字必须压在所有场景 UI 之上；只改 TMP 的实例材质，不碰共享字体材质。
+            _textDisplayer.fontMaterial.renderQueue = FrontQueue;
+            _textDisplayer.SetMaterialDirty();
             _textDisplayer.enabled = false;
             _lastUpdateTiming = MajTimeline.UnscaledTime;
             Localization.OnLanguageChanged += OnLanguageChanged;
