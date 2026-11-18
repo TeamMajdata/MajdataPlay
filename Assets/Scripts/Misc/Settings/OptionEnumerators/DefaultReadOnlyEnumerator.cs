@@ -11,7 +11,7 @@ public sealed class DefaultReadOnlyEnumerator : OptionEnumeratorBase, IOptionEnu
     {
         var value = Value;
         OptionValues[0] = value;
-        ValueTexts[0] = value?.ToString() ?? (IsOptional ? "UNSET" : "NULL");
+        ValueTexts[0] = GetValueText(value);
         RefreshLocalization();
     }
 

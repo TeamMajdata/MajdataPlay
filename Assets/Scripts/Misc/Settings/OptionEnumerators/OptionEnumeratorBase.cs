@@ -1,6 +1,7 @@
 ﻿using MajdataPlay.Settings.Runtime;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 #nullable enable
 namespace MajdataPlay.Settings.OptionEnumerators
@@ -234,10 +235,29 @@ namespace MajdataPlay.Settings.OptionEnumerators
             LocalizedValueTexts = new string[OptionValues.Length];
             for (int i = 0; i < OptionValues.Length; i++)
             {
-                ValueTexts[i] = OptionValues[i]?.ToString() ??
-                    (IsOptional ? "UNSET" : "NULL");
+                ValueTexts[i] = GetValueText(OptionValues[i]);
                 LocalizedValueTexts[i] = LocalizeValueText(OptionValues[i], ValueTexts[i]);
             }
+        }
+        /// <summary>
+        /// Formats an option value as the invariant-culture text the translation keys and the attribute arguments use.
+        /// </summary>
+        /// <remarks>
+        /// Without this a device whose decimal separator is a comma would feed <c>"0,5"</c> into the key templates, so a
+        /// <see cref="TranslateValuesAttribute"/> entry written as <c>"0.5"</c> would no longer match. Text that is not a
+        /// number keeps its own <see cref="object.ToString()"/>, which describes enums and labels the same way everywhere.
+        /// </remarks>
+        /// <param name="value">The option value, or null for a missing value.</param>
+        /// <returns>The invariant-culture number text, the value's own text, or the placeholder of a missing value.</returns>
+        protected string GetValueText(object? value)
+        {
+            if (value is null)
+            {
+                return IsOptional ? "UNSET" : "NULL";
+            }
+            return value is IFormattable formattable
+                ? formattable.ToString(null, CultureInfo.InvariantCulture)
+                : value.ToString() ?? (IsOptional ? "UNSET" : "NULL");
         }
         public virtual void RefreshLocalization()
         {

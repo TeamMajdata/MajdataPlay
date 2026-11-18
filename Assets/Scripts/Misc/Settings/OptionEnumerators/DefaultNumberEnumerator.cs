@@ -323,7 +323,7 @@ public class DefaultNumberEnumerator : OptionEnumeratorBase, IOptionEnumerator
     protected void UpdateValueText()
     {
         var currentValue = Value;
-        ValueTexts[0] = currentValue?.ToString() ?? (IsOptional ? "UNSET" : "NULL");
+        ValueTexts[0] = GetValueText(currentValue);
         LocalizedValueTexts[0] = LocalizeValueText(currentValue, ValueTexts[0]);
     }
 }

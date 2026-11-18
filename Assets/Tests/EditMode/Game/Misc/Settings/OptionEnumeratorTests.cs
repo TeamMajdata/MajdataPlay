@@ -191,6 +191,24 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             public float FrenchStep { get; set; } = 1f;
         }
 
+        /// <summary>
+        /// A settings section used only by the invariant-display test, so its attributes are resolved under the culture of
+        /// that test.
+        /// </summary>
+        public sealed class ShowCultureProbe
+        {
+            /// <summary>A floating point option whose text must not follow the device culture.</summary>
+            public float Ratio { get; set; } = 0.05f;
+
+            /// <summary>A read-only floating point option whose text must not follow the device culture.</summary>
+            [ReadOnlyOption]
+            public float Fixed { get; set; } = 1.5f;
+
+            /// <summary>An untranslated floating point option that translates its half value.</summary>
+            [TranslateValues("0.5")]
+            public float Half { get; set; } = 0.5f;
+        }
+
         /// <summary>The language active before the test.</summary>
         private Language _savedLanguage = null!;
 
@@ -493,7 +511,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             var enumerator = Create<DefaultNumberEnumerator>(display, nameof(DisplayOptions.SensorOpacity));
 
             Assert.That(display.SensorOpacity, Is.EqualTo(expected));
-            Assert.That(enumerator.ValueText, Is.EqualTo(expected.ToString()));
+            Assert.That(enumerator.ValueText, Is.EqualTo(expected.ToString(CultureInfo.InvariantCulture)));
         }
 
         /// <summary>Checks that a value written elsewhere is snapped on refresh and that stepping continues on the grid.</summary>
@@ -507,7 +525,7 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             enumerator.Refresh();
 
             Assert.That(probe.Bounded, Is.EqualTo(1.5f));
-            Assert.That(enumerator.ValueText, Is.EqualTo(1.5f.ToString()));
+            Assert.That(enumerator.ValueText, Is.EqualTo(1.5f.ToString(CultureInfo.InvariantCulture)));
             Assert.That(enumerator.MoveNext(), Is.True);
             Assert.That(probe.Bounded, Is.EqualTo(2f));
         }
@@ -1118,6 +1136,67 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                 Assert.That(property.GetValue(probe), Is.EqualTo(1.5f));
                 Assert.That(enumerator.MoveNext(), Is.True);
                 Assert.That(property.GetValue(probe), Is.EqualTo(2f));
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = savedCulture;
+            }
+        }
+
+        /// <summary>
+        /// Checks that numeric option text stays invariant under a culture whose decimal separator is a comma.
+        /// </summary>
+        /// <remarks>
+        /// The display text is also the <c>{1}</c> of the value translation keys, so a culture-formatted <c>"0,5"</c> would
+        /// miss a <see cref="TranslateValuesAttribute"/> entry written as <c>"0.5"</c> and would show a mixed
+        /// separator/point display. The probe is only used here, because the cached attributes would otherwise be
+        /// resolved under another culture.
+        /// </remarks>
+        /// <param name="cultureName">The culture active while the enumerator formats the text.</param>
+        [TestCase("de-DE")]
+        [TestCase("fr-FR")]
+        [TestCase("ar-SA")]
+        public void NumberEnumerator_FormatsValueTextInvariantly(string cultureName)
+        {
+            var savedCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+                var probe = new ShowCultureProbe();
+
+                var number = Create<DefaultNumberEnumerator>(probe, nameof(ShowCultureProbe.Ratio));
+                var readOnly = Create<DefaultReadOnlyEnumerator>(probe, nameof(ShowCultureProbe.Fixed));
+
+                Assert.That(number.ValueText, Is.EqualTo("0.05"));
+                Assert.That(readOnly.ValueText, Is.EqualTo("1.5"));
+                Assert.That(readOnly.LocalizedValueText, Is.EqualTo("1.5"));
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = savedCulture;
+            }
+        }
+
+        /// <summary>
+        /// Checks that a selected numeric value is translated under a comma-decimal culture, which needs the invariant
+        /// value text in the key.
+        /// </summary>
+        /// <param name="cultureName">The culture active while the value is localized.</param>
+        [TestCase("de-DE")]
+        [TestCase("fr-FR")]
+        public void NumberEnumerator_TranslatesSelectedValueUnderCommaCulture(string cultureName)
+        {
+            var savedCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+                UseLanguage(("MAJSETTING_PROPERTY_Half_OPTION_0.5", "half"));
+                var probe = new ShowCultureProbe();
+
+                var enumerator = Create<DefaultNumberEnumerator>(probe, nameof(ShowCultureProbe.Half));
+
+                Assert.That(enumerator.ValueText, Is.EqualTo("0.5"));
+                Assert.That(enumerator.LocalizedValueText, Is.EqualTo("half"));
             }
             finally
             {

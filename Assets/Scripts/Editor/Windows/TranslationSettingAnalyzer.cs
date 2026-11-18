@@ -451,7 +451,7 @@ namespace MajdataPlay.Editor.Windows
                 case EnumeratorNamespace + "EngineNumberSettingEnumerator":
                 case EnumeratorNamespace + "GameOffsetEnumerator":
                 case EnumeratorNamespace + "AudioVolumeEnumerator":
-                    // Numeric InitValueTexts/UpdateValueText lookups depend on the actual value and culture.
+                    // Numeric InitValueTexts/UpdateValueText lookups depend on the actual value, which is formatted invariantly.
                     if (!IsNumber(type))
                     {
                         diagnostics.Add($"[Settings] {path}: {enumeratorName} cannot initialize this non-numeric property.");
