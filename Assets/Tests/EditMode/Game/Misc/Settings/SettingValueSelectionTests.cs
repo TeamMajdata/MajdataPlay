@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using MajdataPlay.i18n;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.Runtime;
@@ -142,6 +143,35 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.That(distance.Localize(0.5f, "0.5"), Is.EqualTo("0.5"));
             var reported = PrivateMember.GetStaticField<HashSet<string>>(typeof(Localization), "_reportedMissingTranslations");
             Assert.That(reported, Is.EquivalentTo(new[] { "MAJSETTING_PROPERTY_Distance_OPTION_0.5" }));
+        }
+
+        /// <summary>
+        /// Checks that numeric selected values keep their meaning under a culture whose decimal separator is a comma.
+        /// </summary>
+        /// <remarks>
+        /// A value such as <c>"0.5"</c> would otherwise be read as <c>5</c> or dropped as an invalid number, so the option
+        /// would lose its translation for that value.
+        /// </remarks>
+        /// <param name="cultureName">The culture active while the selection is resolved.</param>
+        [TestCase("de-DE")]
+        [TestCase("fr-FR")]
+        public void Resolve_ParsesInvariantValues(string cultureName)
+        {
+            var savedCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+                var distance = Resolve(nameof(SelectionProbe.Distance));
+
+                Assert.That(distance.IsEmpty, Is.False);
+                Assert.That(distance.TryGetKey(0.5f, "0,5", out var half), Is.True);
+                Assert.That(half, Is.EqualTo("MAJSETTING_PROPERTY_Distance_OPTION_0.5"));
+                Assert.That(distance.TryGetKey(5f, "5", out _), Is.False);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = savedCulture;
+            }
         }
     }
 }

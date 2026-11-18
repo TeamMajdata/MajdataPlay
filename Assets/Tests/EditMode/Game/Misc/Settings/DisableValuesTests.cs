@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using MajdataPlay.Settings;
 using MajdataPlay.Settings.OptionEnumerators;
 using NUnit.Framework;
@@ -314,6 +315,37 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             Assert.Throws<ArgumentNullException>(() => SettingDisabledValues.Resolve(null!, "Name", typeof(int)));
             Assert.Throws<ArgumentNullException>(() => SettingDisabledValues.Resolve(Array.Empty<Attribute>(), null!, typeof(int)));
             Assert.Throws<ArgumentNullException>(() => SettingDisabledValues.Resolve(Array.Empty<Attribute>(), "Name", null!));
+        }
+
+        /// <summary>
+        /// Checks that numeric values of <see cref="DisableValuesAttribute"/> keep their meaning under a culture whose
+        /// decimal separator is a comma.
+        /// </summary>
+        /// <remarks>
+        /// A value such as <c>"0.5"</c> would otherwise be read as <c>5</c> or rejected, so either the wrong value would be
+        /// disabled or the attribute would be dropped with an error. The rule is re-parsed on every
+        /// <see cref="SettingDisabledValues.Resolve"/> call, so the cached attributes do not hide the culture.
+        /// </remarks>
+        /// <param name="cultureName">The culture active while the rules are resolved.</param>
+        [TestCase("de-DE")]
+        [TestCase("fr-FR")]
+        public void Resolve_ParsesInvariantNumbers(string cultureName)
+        {
+            var savedCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+                var scale = Resolve(nameof(DisableProbe.Scale));
+
+                Assert.That(scale.IsEmpty, Is.False);
+                Assert.That(scale.IsDisabled(0.5f), Is.True);
+                Assert.That(scale.IsDisabled(5f), Is.False);
+                Assert.That(scale.IsDisabled(0.25f), Is.False);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = savedCulture;
+            }
         }
     }
 }

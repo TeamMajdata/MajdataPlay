@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 
 namespace MajdataPlay.Settings
 {
@@ -7,7 +8,8 @@ namespace MajdataPlay.Settings
     /// Sets the amount by which a numeric setting option changes per navigation step in the setting UI.
     /// </summary>
     /// <remarks>
-    /// The step is written as a decimal string so that any numeric member type can share the attribute.
+    /// The step is written as an invariant-culture decimal string so that any numeric member type can share the
+    /// attribute and so that the value does not depend on the culture of the device.
     /// When neither this attribute nor <see cref="RangeAttribute"/> is present, the number enumerator
     /// uses a default step of 1 for integers and 0.001 for floating-point types.
     /// The steps form a grid that starts at the lower bound of <see cref="RangeAttribute"/>, or at zero without one;
@@ -24,13 +26,13 @@ namespace MajdataPlay.Settings
         /// <summary>
         /// Initializes a new instance of the <see cref="StepAttribute"/> class.
         /// </summary>
-        /// <param name="value">The increment applied per step, as a decimal string.</param>
+        /// <param name="value">The increment applied per step, as an invariant-culture decimal string.</param>
         /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
         /// <exception cref="FormatException"><paramref name="value"/> is not a valid decimal number.</exception>
         /// <exception cref="OverflowException"><paramref name="value"/> is outside the range of <see cref="decimal"/>.</exception>
         public StepAttribute(string value)
         {
-            Value = decimal.Parse(value);
+            Value = decimal.Parse(value, NumberStyles.Number, CultureInfo.InvariantCulture);
         }
     }
 }

@@ -173,6 +173,24 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
             public int LockedOffGrid { get; set; } = 3;
         }
 
+        /// <summary>
+        /// A settings section used only by the comma-culture step test. Each comma culture uses its own property, because
+        /// <see cref="SettingReflectionCache"/> caches attribute instances and <see cref="StepAttribute"/> parses its value
+        /// when the instance is constructed.
+        /// </summary>
+        public sealed class CommaCultureProbe
+        {
+            /// <summary>A bounded option with a decimal step, on the grid at its default value.</summary>
+            [Step("0.5")]
+            [global::MajdataPlay.Settings.Range("0", "2")]
+            public float GermanStep { get; set; } = 1f;
+
+            /// <summary>A bounded option with a decimal step, on the grid at its default value.</summary>
+            [Step("0.5")]
+            [global::MajdataPlay.Settings.Range("0", "2")]
+            public float FrenchStep { get; set; } = 1f;
+        }
+
         /// <summary>The language active before the test.</summary>
         private Language _savedLanguage = null!;
 
@@ -1031,6 +1049,75 @@ namespace MajdataPlay.Tests.Game.Misc.Settings
                 Assert.That(range.Max, Is.EqualTo(1.5m));
                 Assert.That(range.HasMin, Is.True);
                 Assert.That(range.HasMax, Is.True);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = savedCulture;
+            }
+        }
+
+        /// <summary>
+        /// Checks that decimal steps retain their values regardless of the current number culture.
+        /// </summary>
+        /// <remarks>
+        /// A culture whose decimal separator is a comma must not read <c>"0.05"</c> as <c>5</c> (de-DE, es-ES, tr-TR)
+        /// or reject it (fr-FR, ru-RU); either way the step of the affected options would be wrong or the attribute
+        /// would throw while the setting menu is built.
+        /// </remarks>
+        /// <param name="cultureName">The culture active while constructing the attribute.</param>
+        [TestCase("en-US")]
+        [TestCase("zh-CN")]
+        [TestCase("de-DE")]
+        [TestCase("es-ES")]
+        [TestCase("tr-TR")]
+        [TestCase("fr-FR")]
+        [TestCase("ru-RU")]
+        public void StepAttribute_ParsesInvariantStep(string cultureName)
+        {
+            var savedCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+                var step = new StepAttribute("0.05");
+
+                Assert.That(step.Value, Is.EqualTo(0.05m));
+                Assert.That(new StepAttribute("0.001").Value, Is.EqualTo(0.001m));
+                Assert.That(new StepAttribute("30").Value, Is.EqualTo(30m));
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = savedCulture;
+            }
+        }
+
+        /// <summary>
+        /// Checks that a numeric option keeps its declared step and range under a culture whose decimal separator is a comma.
+        /// </summary>
+        /// <remarks>
+        /// The attribute arguments and the enumerator run in the same culture, so this covers the value read at runtime
+        /// rather than only the attribute constructor. Each culture uses its own property, because
+        /// <see cref="SettingReflectionCache"/> caches attribute instances and <see cref="StepAttribute"/> parses its value
+        /// when the instance is constructed.
+        /// </remarks>
+        /// <param name="cultureName">The culture active while the enumerator runs.</param>
+        /// <param name="propertyName">The probe property, which no other test parses before this culture is active.</param>
+        [TestCase("de-DE", nameof(CommaCultureProbe.GermanStep))]
+        [TestCase("fr-FR", nameof(CommaCultureProbe.FrenchStep))]
+        public void NumberEnumerator_UsesInvariantStepUnderCommaCulture(string cultureName, string propertyName)
+        {
+            var savedCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+                var probe = new CommaCultureProbe();
+                var enumerator = Create<DefaultNumberEnumerator>(probe, propertyName);
+                var property = typeof(CommaCultureProbe).GetProperty(propertyName)!;
+
+                Assert.That(property.GetValue(probe), Is.EqualTo(1f), "the stored value is already on the grid");
+                Assert.That(enumerator.MoveNext(), Is.True);
+                Assert.That(property.GetValue(probe), Is.EqualTo(1.5f));
+                Assert.That(enumerator.MoveNext(), Is.True);
+                Assert.That(property.GetValue(probe), Is.EqualTo(2f));
             }
             finally
             {
