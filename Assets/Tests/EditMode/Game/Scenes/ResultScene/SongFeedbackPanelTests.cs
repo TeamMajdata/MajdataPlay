@@ -19,8 +19,9 @@ using UnityEngine.UI;
 namespace MajdataPlay.Tests.Game.Scenes.ResultScene
 {
     /// <summary>
-    /// Covers how <see cref="SongFeedbackPanel"/> loads the vote of the user and sends votes and comments through the
-    /// vote and comment APIs. Every request is answered by a stub HTTP handler, so no network access happens.
+    /// Covers how <see cref="SongFeedbackPanel"/> decides from the counts API whether the panel is offered, loads the
+    /// vote of the user and sends votes and comments through the vote and comment APIs. Every request is answered by a
+    /// stub HTTP handler, so no network access happens.
     /// </summary>
     public class SongFeedbackPanelTests
     {
@@ -58,6 +59,63 @@ namespace MajdataPlay.Tests.Game.Scenes.ResultScene
             _song.Dispose();
             _http.Dispose();
             _temporary.Dispose();
+        }
+
+        /// <summary>
+        /// Checks that the panel is offered when a server other than majdata.net answers the counts API, and that those
+        /// counts become the loaded vote instead of being read again.
+        /// </summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InitAsync_OffersFeedbackWhenServerProvidesInteractions()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                _http.Responder = request => StubHttpScope.Respond(HttpStatusCode.OK, "{\"plays\":2,\"score\":3,\"myVote\":-1}");
+
+                await _panel.InitAsync(_song, true);
+
+                Assert.That(_panel.IsAvailable, Is.True);
+                Assert.That(_panel.IsFirstPlay, Is.True);
+                Assert.That(PrivateMember.GetField<bool>(_panel, "_loaded"), Is.True);
+                Assert.That(PrivateMember.GetField<int>(_panel, "_vote"), Is.EqualTo(-1));
+                Assert.That(PrivateMember.GetField<GameObject>(_panel, "_dislikeOutline").activeSelf, Is.True);
+                var requests = _http.Requests;
+                Assert.That(requests.Length, Is.EqualTo(1));
+                Assert.That(requests[0].Uri.AbsolutePath, Is.EqualTo($"/api/maichart/{_song.Id}/interactsum"));
+            });
+        }
+
+        /// <summary>Checks that a server without the counts API keeps the panel closed, without retrying the missing route.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InitAsync_KeepsFeedbackClosedWhenServerHasNoInteractions()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                _http.Responder = request => StubHttpScope.Respond(HttpStatusCode.NotFound, "{\"code\":40499,\"message\":\"API not supported\"}");
+
+                await _panel.InitAsync(_song, true);
+
+                Assert.That(_panel.IsAvailable, Is.False);
+                Assert.That(_panel.IsOpen, Is.False);
+                Assert.That(PrivateMember.GetField<bool>(_panel, "_loaded"), Is.False);
+                Assert.That(_http.Requests.Length, Is.EqualTo(1));
+            });
+        }
+
+        /// <summary>Checks that the panel sends no request when the result screen does not allow rating, such as in dan mode.</summary>
+        /// <returns>The test coroutine.</returns>
+        [UnityTest]
+        public IEnumerator InitAsync_SendsNothingWhenRatingIsNotAllowed()
+        {
+            return UniTask.ToCoroutine(async () =>
+            {
+                await _panel.InitAsync(_song, false);
+
+                Assert.That(_panel.IsAvailable, Is.False);
+                Assert.That(_http.Requests, Is.Empty);
+            });
         }
 
         /// <summary>
@@ -222,6 +280,8 @@ namespace MajdataPlay.Tests.Game.Scenes.ResultScene
                 Username = "user",
                 Password = "pass"
             };
+            endpoint.RuntimeConfig.IsLoggedIn = true;
+            endpoint.RuntimeConfig.AuthMethod = NetAuthMethodOption.QRCode;
             var detail = new MajnetSongDetail
             {
                 Id = Guid.NewGuid().ToString(),

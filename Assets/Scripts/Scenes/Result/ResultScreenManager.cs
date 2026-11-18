@@ -186,7 +186,7 @@ namespace MajdataPlay.Scenes.Result
             _levelBGDisplayer.color = diffColor;
             _onlineInteractionSender.Init(song, score);
             favoriteAdder.SetSong(song);
-            _feedbackPanel.Init(song, !_gameInfo.IsDanMode);
+            _feedbackPanel.InitAsync(song, !_gameInfo.IsDanMode).Forget();
             userInfoDisplayer.DisplayFromSong(song);
 
 

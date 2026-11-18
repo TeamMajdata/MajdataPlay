@@ -36,6 +36,7 @@ namespace MajdataPlay.Scenes.Result.Components
         [SerializeField] TMP_Text _nextLabel = null!;
 
         public bool IsOpen => _panel.activeSelf;
+        /// <summary>Gets whether the panel may be shown: the player may send and the server answers the interaction API.</summary>
         public bool IsAvailable { get; private set; }
         public bool IsFirstPlay { get; private set; }
         public bool IsBusy { get; private set; }
@@ -64,16 +65,22 @@ namespace MajdataPlay.Scenes.Result.Components
             _commentInput.richText = false;
         }
 
-        public void Init(ISongDetail song, bool allowFeedback)
+        /// <summary>
+        /// Prepares the panel for a played chart and offers it only when the server provides the chart interaction
+        /// API, which is found by reading the counts of the chart.
+        /// </summary>
+        /// <param name="song">The chart that was played.</param>
+        /// <param name="allowFeedback">Whether the result screen allows rating the chart, which it disallows in dan mode.</param>
+        /// <returns>A task that completes when the availability of the panel is settled.</returns>
+        public async UniTask InitAsync(ISongDetail song, bool allowFeedback)
         {
             _song = song as OnlineSongDetail;
-            IsAvailable = allowFeedback && _song != null
-                && string.Equals(_song.ServerInfo.Url.Host, "majdata.net", StringComparison.OrdinalIgnoreCase)
+            IsAvailable = false;
+            IsFirstPlay = false;
+            _canSend = allowFeedback && _song != null
                 && _song.ServerInfo.RuntimeConfig.IsLoggedIn
                 && _song.ServerInfo.RuntimeConfig.AuthMethod != NetAuthMethodOption.None;
-            _canSend = IsAvailable;
-            IsFirstPlay = false;
-            if (IsAvailable)
+            if (_canSend)
             {
                 // Ratings belong to the song/chart ID, shared by all its difficulties.
                 // Capture this before saving the current result increments PlayCount.
@@ -84,6 +91,20 @@ namespace MajdataPlay.Scenes.Result.Components
                     && history.UTAGE.PlayCount == 0;
             }
             SetVisible(false);
+            if (!_canSend)
+            {
+                return;
+            }
+            // A server without GET maichart/{chartId}/interactsum has no votes or comments to show, so reading the
+            // counts is also the check for the API; the counts are then reused when the panel opens.
+            await LoadInteractionAsync();
+            if (this == null)
+            {
+                return;
+            }
+            IsAvailable = _loaded;
+            SetVisible(false);
+            RefreshControls();
         }
 
         public async UniTask OpenAsync()
