@@ -1,0 +1,13 @@
+LIBRARY MajdataPlayTextureUpload
+EXPORTS
+    UnityPluginLoad=UnityPluginLoad@4
+    "_UnityPluginLoad@4"=UnityPluginLoad@4
+    UnityPluginUnload=UnityPluginUnload@0
+    "_UnityPluginUnload@0"=UnityPluginUnload@0
+    MajVkUpload_AbiVersion
+    MajVkUpload_Ready
+    MajVkUpload_Enqueue
+    MajVkUpload_Pending
+    MajVkUpload_EventId
+    MajVkUpload_RenderEventFunc
+    MajVkUpload_Reset

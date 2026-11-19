@@ -111,6 +111,8 @@ out.log
 /Tools/CSharp/**/obj/
 # CMake build trees of the Vulkan pacing layer are always local.
 /Tools/Native/VulkanPacing/.build/
+# CMake build trees of the Vulkan texture upload plug-in are always local.
+/Tools/Native/TextureUpload/.build/
 !/Tools/Tests/Modules/AndroidJavaGeneratorValidation/AndroidJavaGeneratorValidation.csproj
 /Assets/Plugins/MajdataPlay/Platform/Android/MajdataPlay.SourceGenerators.AndroidJava.dll.meta
 

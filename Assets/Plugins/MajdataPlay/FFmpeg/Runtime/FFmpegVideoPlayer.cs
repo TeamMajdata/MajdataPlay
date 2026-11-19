@@ -621,6 +621,8 @@ namespace MajdataPlay.FFmpeg
             }
 
             _uploadTexture = null;
+            // Drop queued plug-in uploads for the texture that no longer exists.
+            VulkanUploadBridge.Reset();
             SetTexture(null);
         }
 
@@ -931,16 +933,41 @@ namespace MajdataPlay.FFmpeg
                         wrapMode = TextureWrapMode.Clamp,
                         filterMode = FilterMode.Bilinear
                     };
+                    // The plug-in caches native image information per texture; a new texture invalidates it.
+                    VulkanUploadBridge.Reset();
                 }
 
+                var bridgeUpload = false;
                 using (UnityProfiler.Create("FFmpeg.Player.CpuUpload"))
                 {
-                    _uploadTexture.LoadRawTextureData(frame.Data, frame.DataSize);
-                    _uploadTexture.Apply(false, false);
+                    // Vulkan players prefer the plug-in copy: it records its own vkCmdCopyBufferToImage instead of
+                    // leaving the frame to Texture2D.Apply, which reproduces a driver hang at large frame sizes.
+                    // Any refusal (wrong backend, unsupported image, no free staging slot) falls back to Unity.
+                    if (VulkanUploadBridge.TryEnqueue(_uploadTexture, frame.Data, frame.Width, frame.Height, frame.Width * 4))
+                    {
+                        VulkanUploadBridge.IssueRenderEvent();
+                        bridgeUpload = true;
+                    }
+                    else
+                    {
+                        _uploadTexture.LoadRawTextureData(frame.Data, frame.DataSize);
+                        _uploadTexture.Apply(false, false);
+                    }
                 }
 
                 output = _uploadTexture;
-                TransferMode = frame.HardwareDecoded ? "Hardware decode + CPU RGBA upload" : "Software RGBA upload";
+                if (bridgeUpload)
+                {
+                    TransferMode = frame.HardwareDecoded
+                        ? "Hardware decode + Vulkan staging upload"
+                        : "Software decode + Vulkan staging upload";
+                }
+                else
+                {
+                    TransferMode = frame.HardwareDecoded
+                        ? "Hardware decode + CPU RGBA upload"
+                        : "Software RGBA upload";
+                }
             }
 
             if (_reportedTransferMode != TransferMode)

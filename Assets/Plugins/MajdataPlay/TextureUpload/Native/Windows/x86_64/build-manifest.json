@@ -1,0 +1,27 @@
+{
+    "target":  "win-x64",
+    "abi":  1,
+    "builtUtc":  "2026-11-19T14:19:06.9137911Z",
+    "compiler":  "MSVC 14.43.34808.0 (19.43.34808.0)",
+    "compilerPath":  "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.43.34808\\bin\\Hostx64\\x64\\cl.exe",
+    "cmake":  "cmake version 3.23.0",
+    "windowsSdk":  "10.0.22621.0",
+    "vulkanHeaderVersion":  275,
+    "files":  [
+                  {
+                      "file":  "MajdataPlayTextureUpload.dll",
+                      "sha256":  "3436b2adb02b2971f5c16cb47ef715988683bd2da1a3237a488132031971c1af",
+                      "bytes":  19968
+                  }
+              ],
+    "sourceSha256Lf":  {
+                           "CMakeLists.txt":  "8ec2bf7391dcbff0ea26b18cf7bcda9060a5628696edb62057821f681448f48a",
+                           "src/ExportsWin32MinGW.def":  "c77fa911ed269cf08a343cb7870a52329dd0cf8ee5ae925ef92ef3b0f9a1c1c2",
+                           "src/StagingRing.h":  "2478c78abba36494185c984eea241c40793ced03a4b089c897cc8b40a8c61652",
+                           "src/TextureUpload.cpp":  "c1a01550bd49ad5afe8c617fca810c17e7f090502d0aebf143bd9014f905cc37",
+                           "src/TextureUpload.h":  "77ec996e6c92632276003e639e8c054dea644c50ce4b13edbf7d775dff90ce51",
+                           "Unity/IUnityGraphics.h":  "524ca42ff0274feec5aea17a5275b774ffc1a031bdc9378f3e3eb2be787a7fa6",
+                           "Unity/IUnityGraphicsVulkan.h":  "de4c4c2a712ad996371ca9bbf513eff1ae31e68b5bc9548c7af68798a1ff72ea",
+                           "Unity/IUnityInterface.h":  "e23e267b57c049b438307542d62c30fbcd3fa77b6dac3b08842eae0df10b8239"
+                       }
+}
