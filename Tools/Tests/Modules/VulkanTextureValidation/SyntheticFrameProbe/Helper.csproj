@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <NoStdLib>true</NoStdLib>
+    <NoConfig>true</NoConfig>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AssemblyName>MajdataPlay.SyntheticFrameProbe</AssemblyName>
+    <Nullable>enable</Nullable>
+    <LangVersion>9.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>bin/Helper/</OutputPath>
+    <PlayerManagedDirectory>$(MSBuildThisFileDirectory)../../../../../Build/MajdataPlay_Data/Managed</PlayerManagedDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Helper.cs" />
+    <Compile Include="ReadbackGate.cs" />
+    <Compile Include="HelperAssemblyInfo.cs" />
+    <Reference Include="mscorlib"><HintPath>$(PlayerManagedDirectory)/mscorlib.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System"><HintPath>$(PlayerManagedDirectory)/System.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Core"><HintPath>$(PlayerManagedDirectory)/System.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(PlayerManagedDirectory)/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(PlayerManagedDirectory)/UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(PlayerManagedDirectory)/UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

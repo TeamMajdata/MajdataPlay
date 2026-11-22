@@ -1,0 +1,5 @@
+# Local evidence and build trees for this diagnostic module are never committed.
+.work/
+**/.build/
+**/bin/
+**/obj/

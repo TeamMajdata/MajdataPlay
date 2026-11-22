@@ -1,0 +1,19 @@
+{
+    "file_format_version": "1.1.0",
+    "layer": {
+        "name": "VK_LAYER_MAJDATAPLAY_SYNC",
+        "type": "GLOBAL",
+        "library_path": ".\\VkLayer_majdataplay_sync.dll",
+        "api_version": "1.1.0",
+        "implementation_version": "1",
+        "description": "MajdataPlay diagnostic buffer-visibility sync layer (injects an explicit transfer-write to vertex-input dependency; not a production fix)",
+        "functions": {
+            "vkGetInstanceProcAddr": "vkGetInstanceProcAddr",
+            "vkGetDeviceProcAddr": "vkGetDeviceProcAddr",
+            "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion"
+        },
+        "disable_environment": {
+            "MAJDATAPLAY_SYNC_DISABLE": "1"
+        }
+    }
+}
