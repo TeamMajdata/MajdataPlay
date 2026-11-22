@@ -1,5 +1,5 @@
 ﻿// Host-only tests. Fake Vulkan/Unity entry points; no loader, device or GPU work.
-#include "Hook.cpp"
+#include "../src/VulkanSyncHook.cpp"
 #include <iostream>
 #include <stdexcept>
 
