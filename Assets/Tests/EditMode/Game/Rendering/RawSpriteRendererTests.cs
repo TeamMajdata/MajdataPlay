@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 namespace MajdataPlay.Tests.Game.Rendering
 {
     /// <summary>
-    /// Verifies the SpriteRenderer-like API of <see cref="RawSpriteRenderer"/> and <see cref="NoteRenderer"/> in Edit Mode,
+    /// Verifies the SpriteRenderer-like API of <see cref="RawSpriteRenderer"/> in Edit Mode,
     /// where the components run because they execute always.
     /// </summary>
     public class RawSpriteRendererTests
@@ -350,27 +350,6 @@ namespace MajdataPlay.Tests.Game.Rendering
                 "registering a renderer installs the updater");
             var empty = new UnityEngine.LowLevel.PlayerLoopSystem();
             Assert.That(PrivateMember.InvokeStatic<bool>(typeof(RawSpriteRenderer.Updater), "ContainsMarker", empty, marker), Is.False);
-        }
-
-        /// <summary>Checks that the note renderer falls back to the base mesh and material while the editor is not playing.</summary>
-        [Test]
-        public void NoteRenderer_UsesBaseResourcesOutsidePlayMode()
-        {
-            var renderer = _objects.Add<NoteRenderer>();
-            UnityMessages.Send(renderer, "Awake");
-            UnityMessages.Send(renderer, "OnEnable");
-            renderer.SharedMaterial = _material;
-            renderer.Sprite = _sprite;
-            Apply(renderer);
-            var simpleMesh = renderer.GetComponent<MeshFilter>().sharedMesh;
-            renderer.DrawMode = SpriteDrawMode.Sliced;
-            renderer.Size = new Vector2(3, 3);
-            Apply(renderer);
-
-            Assert.That(simpleMesh, Is.Not.Null);
-            Assert.That(renderer.GetComponent<MeshFilter>().sharedMesh.vertexCount, Is.EqualTo(36));
-            Assert.That(renderer.GetComponent<MeshRenderer>().sharedMaterial.GetTexture("_MainTex"), Is.SameAs(_sprite.texture));
-            Assert.That(PrivateMember.GetField<int>(renderer, "_resourceVersion"), Is.EqualTo(NoteSpriteResources.Version));
         }
 
         /// <summary>Creates a renderer, optionally with a sprite already applied.</summary>

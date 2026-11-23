@@ -1,7 +1,6 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
-using MajdataPlay.Scenes.Game.Notes.Skins;
 using UnityEngine;
 
 #nullable enable
@@ -152,32 +151,6 @@ namespace MajdataPlay.Diagnostics
         public static void LogError<T>(string tag, T message)
         {
             Debug.LogError(tag + ": " + message);
-        }
-    }
-}
-
-namespace MajdataPlay.Rendering
-{
-    /// <summary>
-    /// Supplies the skin mesh service; its meshes are small and outside the measured decode path.
-    /// </summary>
-    public static class NoteSpriteResources
-    {
-        /// <summary>
-        /// Accepts a resource release.
-        /// </summary>
-        /// <param name="skin">The owner of the resources.</param>
-        public static void Unload(CustomSkin skin)
-        {
-        }
-
-        /// <summary>
-        /// Accepts mesh preloading.
-        /// </summary>
-        /// <param name="skin">The owner of the resources.</param>
-        /// <param name="sprites">The skin's sprites.</param>
-        public static void PreloadMeshes(CustomSkin skin, IEnumerable<Sprite> sprites)
-        {
         }
     }
 }

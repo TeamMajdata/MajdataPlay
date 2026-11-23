@@ -4,7 +4,6 @@ using MajdataPlay.Buffers;
 using MajdataPlay.Diagnostics;
 using MajdataPlay.Drawing;
 using MajdataPlay.IO.Storage;
-using MajdataPlay.Rendering;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -411,7 +410,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             {
                 await UniTask.SwitchToMainThread();
                 if (!IsLoaded) return;
-                NoteSpriteResources.Unload(this);
 
                 SubDisplay = SafeDestroyIndependent(SubDisplay);
                 LoadingSplash = SafeDestroyIndependent(LoadingSplash);
@@ -578,7 +576,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             _atlasTexture = await builder.BuildAndAssignAsync();
 
             ProcessFallbacks();
-            NoteSpriteResources.PreloadMeshes(this, builder.Sprites);
             IsLoaded = true;
         }
 
@@ -596,7 +593,6 @@ namespace MajdataPlay.Scenes.Game.Notes.Skins
             _atlasTexture = builder.BuildAndAssign();
 
             ProcessFallbacks();
-            NoteSpriteResources.PreloadMeshes(this, builder.Sprites);
             IsLoaded = true;
         }
 

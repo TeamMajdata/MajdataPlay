@@ -3,7 +3,6 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using MajdataPlay.Scenes.Game.Notes.Skins;
 using UnityEngine;
 
 #nullable enable
@@ -188,32 +187,6 @@ namespace MajdataPlay.Diagnostics
         public static void LogWarning(string context, string message)
         {
             Debug.LogWarning(context + ": " + message);
-        }
-    }
-}
-
-namespace MajdataPlay.Rendering
-{
-    /// <summary>
-    /// Supplies the unused skin resource service required to compile CustomSkin.
-    /// </summary>
-    public static class NoteSpriteResources
-    {
-        /// <summary>
-        /// Accepts a resource release outside the tested AtlasBuilder surface.
-        /// </summary>
-        /// <param name="skin">The owner of the resources.</param>
-        public static void Unload(CustomSkin skin)
-        {
-        }
-
-        /// <summary>
-        /// Accepts mesh preloading outside the tested AtlasBuilder surface.
-        /// </summary>
-        /// <param name="skin">The owner of the resources.</param>
-        /// <param name="sprites">The skin's sprites.</param>
-        public static void PreloadMeshes(CustomSkin skin, IEnumerable<Sprite> sprites)
-        {
         }
     }
 }

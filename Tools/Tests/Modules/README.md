@@ -33,9 +33,9 @@ Tight atlas packing logs a warning and falls back to Simple geometry.
 A conservative estimate above 65,536 quads logs a warning and falls back to Sliced
 geometry, preventing unbounded mesh allocation for very large tiled sizes.
 
-Identical settings share immutable meshes. Changing Size can allocate a new mesh;
-continuous size animation is not allocation-free. NoteRenderer keeps its preloaded
-Simple meshes and uses the shared cache for Sliced/Tiled, still ignoring flips.
+Identical settings share immutable meshes; the applied flips are part of the cache
+key, and Simple mode ignores Size. Changing Size can allocate a new mesh, so
+continuous size animation is not allocation-free.
 
 ## Rendering library layout
 

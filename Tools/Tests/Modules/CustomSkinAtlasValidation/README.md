@@ -51,7 +51,7 @@ limits do not change the host driver's actual constructor checks. Cases whose
 effective atlas ceiling exceeds the host's real limit are skipped and logged.
 
 Narrow service substitutes supply a disposable list/array pool, Unity PNG decoding for the
-independent-sprite `TextureLoader` (not exercised here), logging and the unused skin preload service. The production
+independent-sprite `TextureLoader` (not exercised here) and logging. The production
 packing, border scaling, outline extraction and triangulation remain intact.
 This validates the atlas path in the Editor with the selected desktop graphics
 API; atlas sources are decoded by the real Skia path; it does **not** validate complete skin loading or memory use

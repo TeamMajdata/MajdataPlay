@@ -1,9 +1,5 @@
-using System;
 using System.Collections;
-using System.Reflection;
-using MajdataPlay.Drawing;
 using MajdataPlay.Rendering;
-using MajdataPlay.Scenes.Game.Notes.Skins;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -12,8 +8,7 @@ using UnityEngine.TestTools;
 namespace MajdataPlay.Tests.Game.Rendering.PlayMode
 {
     /// <summary>
-    /// Verifies that the player loop updater drives <see cref="RawSpriteRenderer"/> in Play Mode and that
-    /// <see cref="NoteRenderer"/> borrows the preloaded note resources while playing.
+    /// Verifies that the player loop updater drives <see cref="RawSpriteRenderer"/> in Play Mode.
     /// </summary>
     public class RawSpriteRendererPlayModeTests
     {
@@ -26,11 +21,10 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
         /// <summary>A source material.</summary>
         private Material _material = null!;
 
-        /// <summary>Creates the sprite and material and clears the note caches.</summary>
+        /// <summary>Creates the sprite and material.</summary>
         [SetUp]
         public void SetUp()
         {
-            PrivateMember.InvokeStatic(typeof(NoteSpriteResources), "ResetStatics");
             _objects = new TestObjects();
             var texture = _objects.Track(new Texture2D(32, 32) { name = "PlayModeSpriteTexture" });
             _sprite = _objects.Track(Sprite.Create(texture, new Rect(0, 0, 32, 32), new Vector2(0.5f, 0.5f), 16f, 0,
@@ -38,12 +32,11 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
             _material = _objects.Track(new Material(Shader.Find("Sprites/Default")) { name = "PlayModeMaterial" });
         }
 
-        /// <summary>Destroys the objects and clears the note caches.</summary>
+        /// <summary>Destroys the objects.</summary>
         [TearDown]
         public void TearDown()
         {
             _objects.Dispose();
-            PrivateMember.InvokeStatic(typeof(NoteSpriteResources), "ResetStatics");
         }
 
         /// <summary>Checks that property changes are applied by the updater on the next frame.</summary>
@@ -78,34 +71,6 @@ namespace MajdataPlay.Tests.Game.Rendering.PlayMode
             yield return null;
             yield return null;
             Assert.That(mesh == null, Is.True, "destroying the last user releases the mesh");
-        }
-
-        /// <summary>Checks that a playing note renderer uses the preloaded Simple mesh and material and falls back for Sliced meshes.</summary>
-        /// <returns>The test coroutine.</returns>
-        [UnityTest]
-        public IEnumerator NoteRenderer_UsesPreloadedResources()
-        {
-            var skin = (CustomSkin)Activator.CreateInstance(typeof(CustomSkin), BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { "PlayModeSkin" }, null)!;
-            PrivateMember.SetProperty(skin, nameof(CustomSkin.IsLoaded), true);
-            NoteSpriteResources.PreloadMeshes(skin, new[] { _sprite });
-            NoteSpriteResources.PreloadMaterials(skin, _material);
-            var renderer = _objects.Add<NoteRenderer>();
-            renderer.SharedMaterial = _material;
-            renderer.Sprite = _sprite;
-            yield return null;
-            yield return null;
-
-            Assert.That(renderer.GetComponent<MeshFilter>().sharedMesh, Is.SameAs(NoteSpriteResources.GetMesh(_sprite)));
-            Assert.That(renderer.GetComponent<MeshRenderer>().sharedMaterial, Is.SameAs(NoteSpriteResources.GetMaterial(_material, _sprite.texture)));
-
-            renderer.DrawMode = SpriteDrawMode.Sliced;
-            renderer.Size = new Vector2(2, 2);
-            yield return null;
-            Assert.That(renderer.GetComponent<MeshFilter>().sharedMesh, Is.Not.SameAs(NoteSpriteResources.GetMesh(_sprite)));
-
-            NoteSpriteResources.Unload(skin);
-            yield return null;
-            Assert.That(PrivateMember.GetField<int>(renderer, "_resourceVersion"), Is.EqualTo(NoteSpriteResources.Version));
         }
     }
 }

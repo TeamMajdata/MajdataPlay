@@ -1,6 +1,5 @@
 ﻿using Cysharp.Text;
 using Cysharp.Threading.Tasks;
-using MajdataPlay.Rendering;
 using MajdataPlay.Databases;
 using MajdataPlay.Buffers;
 using MajdataPlay.Collections;
@@ -282,10 +281,6 @@ namespace MajdataPlay.Scenes.Game
         internal async UniTask LoadNotesIntoPoolAsync(SimaiChart maiChart, CancellationToken token = default)
         {
             await UniTask.SwitchToMainThread(token);
-            var skin = MajInstances.SkinManager.SelectedSkin;
-            var materials = GameRuntime.Instance.Note;
-            NoteSpriteResources.PreloadMaterials(skin, materials.DefaultMaterial,
-                materials.BreakMaterial, materials.HoldShineMaterial, breakMaterial);
 
             List<Task> touchTasks = new();
 
